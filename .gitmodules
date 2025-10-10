@@ -1,0 +1,4 @@
+[submodule "openrtb2.x"]
+	path = openrtb2.x
+	url = https://github.com/InteractiveAdvertisingBureau/openrtb2.x.git
+	branch = proto-editions
