@@ -177,7 +177,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     pbjson_build::Builder::new()
         .register_descriptors(&descriptor_set)?
         .preserve_proto_field_names() // Keep original field names (not camelCase)
-        .emit_fields() // Allow field number access
+        //.emit_fields() // dont emit field defaults
         .build(&[".com.iabtechlab.openrtb.v2"])?;
 
     Ok(())

@@ -583,6 +583,7 @@ dependencies = [
  "protoc-bin-vendored",
  "serde",
  "serde_json",
+ "smallvec",
  "tonic",
  "tonic-prost-build",
 ]
