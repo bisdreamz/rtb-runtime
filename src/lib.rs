@@ -1,7 +1,9 @@
-// Include the generated protobuf code
-pub mod openrtb {
-    tonic::include_proto!("com.iabtechlab.openrtb.v2");
-}
+// Compatibility helpers and utilities for OpenRTB JSON handling.
+pub mod json;
+pub use json::openrtb_json;
 
-// Re-export commonly used types for convenience
+pub mod openrtb;
 pub use openrtb::*;
+
+// Re-export pbjson_types for working with google.protobuf.Value (with serde support).
+pub use pbjson_types;
