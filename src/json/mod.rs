@@ -1,1 +1,1 @@
-pub mod openrtb_json;
+pub mod bool_as_int;

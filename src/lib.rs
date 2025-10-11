@@ -1,6 +1,5 @@
-// Compatibility helpers and utilities for OpenRTB JSON handling.
+/// Internal helpers shared by generated code (e.g. bool-as-int serde wrappers).
 pub mod json;
-pub use json::openrtb_json;
 
 pub mod openrtb;
 pub use openrtb::*;
