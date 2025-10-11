@@ -10,7 +10,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use heck::ToSnakeCase;
+use heck::{ToSnakeCase, ToUpperCamelCase};
 use prost::Message;
 use prost_types::{DescriptorProto, FileDescriptorSet, field_descriptor_proto::Type as FieldType};
 
@@ -186,8 +186,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build(&[".com.iabtechlab.openrtb.v2"])?;
 
     let bool_fields = collect_bool_field_names(&descriptor_set)?;
+    let ext_fields = collect_ext_field_info(&descriptor_set)?;
     let serde_path = out_dir.join("com.iabtechlab.openrtb.v2.serde.rs");
     patch_pbjson_bool_handling(&serde_path, &bool_fields)?;
+
+    // Patch extension fields to use ExtWithCustom wrapper (in prost-generated file)
+    let proto_path = out_dir.join("com.iabtechlab.openrtb.v2.rs");
+    patch_ext_wrapper(&proto_path, &ext_fields)?;
 
     Ok(())
 }
@@ -295,7 +300,7 @@ fn patch_pbjson_bool_handling(
                             format!("struct_ser.serialize_field(\"{field}\", &self.{field})?;");
                         if lines[j].contains(&needle) {
                             let replacement = format!(
-                                "struct_ser.serialize_field(\"{field}\", &crate::json::bool_as_int::Ser(&self.{field}))?;"
+                                "struct_ser.serialize_field(\"{field}\", &crate::compat::bool_as_int::Ser(&self.{field}))?;"
                             );
                             lines[j] = lines[j].replace(&needle, &replacement);
                             serialize_hits += 1;
@@ -323,7 +328,7 @@ fn patch_pbjson_bool_handling(
                         let pattern = format!("{field}__ = Some(map_.next_value()?);");
                         if lines[j].contains(&pattern) {
                             let replacement = format!(
-                                "{field}__ = Some(map_.next_value::<crate::json::bool_as_int::De>()?.0);"
+                                "{field}__ = Some(map_.next_value::<crate::compat::bool_as_int::De>()?.0);"
                             );
                             lines[j] = lines[j].replace(&pattern, &replacement);
                             deserialize_hits += 1;
@@ -331,7 +336,7 @@ fn patch_pbjson_bool_handling(
                             let direct_pattern = format!("{field}__ = map_.next_value()?;");
                             if lines[j].contains(&direct_pattern) {
                                 let replacement = format!(
-                                    "{field}__ = map_.next_value::<crate::json::bool_as_int::De>()?.0;"
+                                    "{field}__ = map_.next_value::<crate::compat::bool_as_int::De>()?.0;"
                                 );
                                 lines[j] = lines[j].replace(&direct_pattern, &replacement);
                                 deserialize_hits += 1;
@@ -364,6 +369,78 @@ fn patch_pbjson_bool_handling(
     Ok(())
 }
 
+#[derive(Debug, Clone)]
+struct ExtFieldInfo {
+    struct_path: String,
+    ext_type_path: String,
+    rust_struct_name: String,
+}
+
+fn collect_ext_field_info(
+    descriptor_bytes: &[u8],
+) -> Result<Vec<ExtFieldInfo>, Box<dyn std::error::Error>> {
+    let descriptor_set = FileDescriptorSet::decode(descriptor_bytes)?;
+    let mut fields = Vec::new();
+
+    for file in descriptor_set.file {
+        if file.package.as_deref() != Some("com.iabtechlab.openrtb.v2") {
+            continue;
+        }
+        for message in file.message_type {
+            let mut path = Vec::new();
+            collect_ext_from_message(&message, &mut path, &mut fields);
+        }
+    }
+
+    Ok(fields)
+}
+
+fn collect_ext_from_message(
+    message: &DescriptorProto,
+    path: &mut Vec<String>,
+    fields: &mut Vec<ExtFieldInfo>,
+) {
+    let name = match &message.name {
+        Some(name) => name.clone(),
+        None => return,
+    };
+
+    path.push(name);
+
+    for field in &message.field {
+        if field.name.as_deref() == Some("ext") {
+            if let Some(type_name) = &field.type_name {
+                if type_name.ends_with(".Ext") {
+                    let struct_path = rust_type_path(path);
+                    let proto_name = path.last().unwrap();
+                    let ext_module = proto_name.to_snake_case();
+                    let ext_type_path = format!("{}::Ext", ext_module);
+                    let rust_struct_name = proto_name.to_upper_camel_case();
+                    fields.push(ExtFieldInfo {
+                        struct_path,
+                        ext_type_path,
+                        rust_struct_name,
+                    });
+                }
+            }
+        }
+    }
+
+    for nested in &message.nested_type {
+        if nested
+            .options
+            .as_ref()
+            .and_then(|opt| opt.map_entry)
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        collect_ext_from_message(nested, path, fields);
+    }
+
+    path.pop();
+}
+
 fn extract_impl_type(line: &str, prefix: &str) -> Option<String> {
     let trimmed = line.trim_start();
     if let Some(rest) = trimmed.strip_prefix(prefix) {
@@ -378,4 +455,130 @@ fn brace_delta(line: &str) -> i32 {
         '}' => acc - 1,
         _ => acc,
     })
+}
+
+/// Patches generated proto code to wrap extension fields with ExtWithCustom.
+///
+/// This function uses descriptor-driven metadata to reliably identify every
+/// OpenRTB `ext` field and wraps it with `ExtWithCustom<T>` so we preserve both
+/// proto-defined fields and dynamic JSON data.
+fn patch_ext_wrapper(
+    proto_path: &Path,
+    ext_fields: &[ExtFieldInfo],
+) -> Result<(), Box<dyn std::error::Error>> {
+    if ext_fields.is_empty() {
+        return Ok(());
+    }
+
+    let code = fs::read_to_string(proto_path)
+        .map_err(|e| format!("failed to read generated proto file for ext patching: {e}"))?;
+
+    let mut lines: Vec<String> = code.lines().map(|s| s.to_string()).collect();
+    let mut replacements = 0usize;
+    let mut copy_removed: BTreeSet<String> = BTreeSet::new();
+
+    for field in ext_fields {
+        let search = format!("::core::option::Option<{}>", field.ext_type_path);
+        let replacement = format!(
+            "::core::option::Option<crate::extensions::ExtWithCustom<{}>>",
+            field.ext_type_path
+        );
+
+        let mut found_idx = None;
+        for (idx, line) in lines.iter_mut().enumerate() {
+            if line.contains(&search) {
+                if !line.contains("ExtWithCustom") {
+                    *line = line.replace(&search, &replacement);
+                    replacements += 1;
+                }
+                found_idx = Some(idx);
+                break;
+            }
+        }
+
+        let field_line_idx = match found_idx {
+            Some(idx) => idx,
+            None => {
+                return Err(format!(
+                    "Failed to locate ext field declaration for {}",
+                    field.ext_type_path
+                )
+                .into());
+            }
+        };
+
+        if copy_removed.insert(field.struct_path.clone()) {
+            remove_copy_from_struct(&mut lines, field_line_idx, &field.rust_struct_name)?;
+        }
+    }
+
+    let remaining = lines
+        .iter()
+        .filter(|line| {
+            let trimmed = line.trim();
+            trimmed.starts_with("pub ext: ::core::option::Option<")
+                && trimmed.contains("::Ext>")
+                && !trimmed.contains("ExtWithCustom")
+        })
+        .count();
+
+    if remaining > 0 {
+        return Err(format!(
+            "Verification failed: {} unwrapped ext fields remain after patching",
+            remaining
+        )
+        .into());
+    }
+
+    let mut output = lines.join("\n");
+    output.push('\n');
+    fs::write(proto_path, output)
+        .map_err(|e| format!("failed to write ext-patched proto file: {e}"))?;
+
+    println!(
+        "cargo:warning=Patched {} ext fields to use ExtWithCustom",
+        replacements
+    );
+
+    Ok(())
+}
+
+fn remove_copy_from_struct(
+    lines: &mut [String],
+    start_idx: usize,
+    struct_name: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if struct_name.is_empty() {
+        return Ok(());
+    }
+
+    let mut struct_idx = None;
+    for i in (0..=start_idx).rev() {
+        if lines[i].contains(&format!("pub struct {}", struct_name)) {
+            struct_idx = Some(i);
+            break;
+        }
+    }
+
+    if let Some(struct_idx) = struct_idx {
+        for i in (0..struct_idx).rev() {
+            let trimmed = lines[i].trim();
+            if trimmed.starts_with("#[derive(") {
+                if lines[i].contains("Copy") {
+                    let updated = lines[i]
+                        .replace(", Copy", "")
+                        .replace("Copy, ", "")
+                        .replace("Copy", "");
+                    lines[i] = updated;
+                }
+                break;
+            }
+
+            if trimmed.starts_with("pub struct") || trimmed.starts_with("pub enum") {
+                break;
+            }
+        }
+    }
+
+    Ok(())
 }

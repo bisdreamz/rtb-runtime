@@ -1,0 +1,42 @@
+{
+  "id": "68e3c2bd_0b23dea1f5ebac8487bca87e9d673710_0-a5",
+  "imp": [
+    {
+      "id": "1",
+      "banner": {
+        "w": 300,
+        "h": 250,
+        "topframe": 1
+      },
+      "instl": 0,
+      "secure": 1,
+      "bidfloor": 0.5,
+      "ext": {
+        "gpid": "/homepage/banner",
+        "channel": 546
+      }
+    }
+  ],
+  "site": {
+    "id": "102855",
+    "domain": "example.com",
+    "cat": ["IAB3-1"],
+    "page": "https://example.com/page"
+  },
+  "device": {
+    "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "ip": "192.168.1.1",
+    "devicetype": 2,
+    "dnt": 0,
+    "lmt": 0
+  },
+  "user": {
+    "id": "user123"
+  },
+  "source": {
+    "fd": 1,
+    "tid": "transaction-123"
+  },
+  "test": 0,
+  "tmax": 200
+}
