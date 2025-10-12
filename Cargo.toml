@@ -1,7 +1,10 @@
 [package]
-name = "openrtb-rs"
+name = "rtb-runtime"
 version = "0.1.0"
 edition = "2024"
+
+[lib]
+name = "rtb"
 
 [dependencies]
 prost = "0.14"
