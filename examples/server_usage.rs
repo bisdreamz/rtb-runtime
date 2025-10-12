@@ -1,8 +1,8 @@
-use actix_web::{web, HttpResponse};
 use actix_web::web::{Json, PayloadConfig, ServiceConfig};
+use actix_web::{HttpResponse, web};
+use openrtb_rs::BidRequest;
 use openrtb_rs::server::extractors::Protobuf;
 use openrtb_rs::server::server::{Server, ServerConfig, TlsConfig};
-use openrtb_rs::BidRequest;
 
 fn log_br(req: BidRequest) {
     println!("{}", serde_json::to_string(&req).unwrap());
@@ -29,13 +29,13 @@ async fn main() {
     let cfg = ServerConfig {
         http_port: Some(80),
         ssl_port: Some(443),
-        tls:  Some(TlsConfig::SelfSigned {
-            hosts: vec![String::from("localhost")]
+        tls: Some(TlsConfig::SelfSigned {
+            hosts: vec![String::from("localhost")],
         }),
         tcp_backlog: None,
         max_conns: None,
         threads: None,
-        tls_rate_per_worker: Some(512)
+        tls_rate_per_worker: Some(512),
     };
 
     let service = |cfg: &mut ServiceConfig| {
@@ -44,14 +44,14 @@ async fn main() {
             .app_data(PayloadConfig::new(512 * 1024))
             // Hello world endpoint
             .route("/hello", web::get().to(|| async { "Hello world!" }))
-            .service(web::scope("/br")
-                .route("/proto", web::post().to(proto_bid_handler))
-                .route("/json", web::post().to(json_bid_handler))
+            .service(
+                web::scope("/br")
+                    .route("/proto", web::post().to(proto_bid_handler))
+                    .route("/json", web::post().to(json_bid_handler)),
             );
     };
 
-    let server = Server::listen(cfg, service)
-        .await.expect("Should listen");
+    let server = Server::listen(cfg, service).await.expect("Should listen");
 
     println!("Server listening on port 80 (HTTP) and 443 (HTTPS)");
     println!("  - GET  /hello    - Hello world");

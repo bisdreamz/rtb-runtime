@@ -1,8 +1,8 @@
-use actix_web::{web, HttpResponse};
 use actix_web::web::{PayloadConfig, ServiceConfig};
+use actix_web::{HttpResponse, web};
+use openrtb_rs::BidRequest;
 use openrtb_rs::server::extractors::Protobuf;
 use openrtb_rs::server::server::{Server, ServerConfig, TlsConfig};
-use openrtb_rs::BidRequest;
 use prost::Message;
 use std::fs;
 use std::time::Duration;

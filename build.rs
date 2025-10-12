@@ -162,10 +162,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .extern_path(".google.protobuf", "::pbjson_types")
         // Restore builder derives on all generated message structs
         .message_attribute(".", "#[derive(derive_builder::Builder)]")
-        .message_attribute(
-            ".",
-            "#[builder(setter(into, strip_option), default)]",
-        )
+        .message_attribute(".", "#[builder(setter(into, strip_option), default)]")
         // Emit file descriptor for pbjson
         .file_descriptor_set_path(&descriptor_path)
         // Add include path for well-known types
