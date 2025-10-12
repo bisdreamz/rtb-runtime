@@ -1,7 +1,7 @@
 use actix_web::{web, HttpResponse};
 use actix_web::web::{Json, PayloadConfig, ServiceConfig};
 use openrtb_rs::server::extractors::Protobuf;
-use openrtb_rs::server::server::{Binding, Server, ServerConfig, TlsConfig};
+use openrtb_rs::server::server::{Server, ServerConfig, TlsConfig};
 use openrtb_rs::BidRequest;
 
 fn log_br(req: BidRequest) {
@@ -27,17 +27,15 @@ async fn json_bid_handler(req: Json<BidRequest>) -> HttpResponse {
 #[actix_rt::main]
 async fn main() {
     let cfg = ServerConfig {
+        http_port: Some(80),
+        ssl_port: Some(443),
+        tls:  Some(TlsConfig::SelfSigned {
+            hosts: vec![String::from("localhost")]
+        }),
         tcp_backlog: None,
         max_conns: None,
         threads: None,
         tls_rate_per_worker: Some(512)
-    };
-
-    let binding = Binding::Both {
-        port: 80,
-        tls: TlsConfig::SelfSigned {
-            hosts: vec![String::from("localhost")]
-        }
     };
 
     let service = |cfg: &mut ServiceConfig| {
@@ -52,7 +50,7 @@ async fn main() {
             );
     };
 
-    let server = Server::listen(cfg, binding, service)
+    let server = Server::listen(cfg, service)
         .await.expect("Should listen");
 
     println!("Server listening on port 80 (HTTP) and 443 (HTTPS)");

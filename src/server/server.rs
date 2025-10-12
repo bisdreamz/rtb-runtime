@@ -23,22 +23,15 @@ pub enum TlsConfig {
     }
 }
 
-/// Specifies listener config for HTTP, HTTPS, or both
-pub enum Binding {
-    Http {
-        port: u16
-    },
-    Https {
-        tls: TlsConfig,
-    },
-    Both {
-        port: u16,
-        tls: TlsConfig
-    }
-}
-
 /// Configures server limit options
 pub struct ServerConfig {
+    /// Port to attach http listener to. If none, will not accept plain http traffic
+    pub http_port: Option<u16>,
+    /// Port to attach https listener to. If none, will default to 443 if a tls config
+    /// is provided. If None and no tls config, then no SSL listener will be configured.
+    pub ssl_port: Option<u16>,
+    /// Cert config required if ssl_port is set
+    pub tls: Option<TlsConfig>,
     pub tcp_backlog: Option<u32>,
     pub max_conns: Option<usize>,
     pub threads: Option<usize>,
@@ -113,7 +106,7 @@ impl Server {
     ///
     /// Server spawns in the background. User responsible for shutdown hooks and
     /// calling [`stop()'] to shutdown the server gracefully.
-    pub async fn listen<F> (cfg: ServerConfig, binding: Binding, configure: F) -> Result<Server, std::io::Error>
+    pub async fn listen<F> (cfg: ServerConfig, configure: F) -> Result<Server, std::io::Error>
     where F: Fn(&mut web::ServiceConfig) + Send + Sync + Clone + 'static {
         let mut app = HttpServer::new(move || {
             App::new()
@@ -126,20 +119,14 @@ impl Server {
             .max_connection_rate(cfg.tls_rate_per_worker.unwrap_or(256))
             .disable_signals();
 
-        app = match binding {
-            Binding::Http {port} => {
-                app.bind_auto_h2c((LISTEN_ADDR, port))?
-            },
-            Binding::Https { tls } => {
-                let server_cfg = Self::build_tls(tls)?;
-                app.bind_rustls_0_23((LISTEN_ADDR, 443), server_cfg)?
-            },
-            Binding::Both { port, tls } => {
-                let server_cfg = Self::build_tls(tls)?;
-                app.bind_auto_h2c((LISTEN_ADDR, port))?
-                    .bind_rustls_0_23((LISTEN_ADDR, 443), server_cfg)?
-            },
-        };
+        if let Some(http_port) = cfg.http_port {
+            app = app.bind_auto_h2c((LISTEN_ADDR, http_port))?;
+        }
+
+        if let Some(tls) = cfg.tls {
+            let server_cfg = Self::build_tls(tls)?;
+            app = app.bind_rustls_0_23((LISTEN_ADDR, cfg.ssl_port.unwrap_or(443)), server_cfg)?
+        }
 
         let run = app.run();
         let handle = run.handle();
