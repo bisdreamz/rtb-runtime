@@ -156,13 +156,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let descriptor_path = out_dir.join("descriptor.bin");
 
-    tonic_prost_build::configure()
+    prost_build::Config::new()
         // Use extern path for well-known types
-        .compile_well_known_types(true)
+        .compile_well_known_types()
         .extern_path(".google.protobuf", "::pbjson_types")
-        // Add builder pattern support for easier construction (structs only)
+        // Restore builder derives on all generated message structs
         .message_attribute(".", "#[derive(derive_builder::Builder)]")
-        .message_attribute(".", "#[builder(setter(into, strip_option), default)]")
+        .message_attribute(
+            ".",
+            "#[builder(setter(into, strip_option), default)]",
+        )
         // Emit file descriptor for pbjson
         .file_descriptor_set_path(&descriptor_path)
         // Add include path for well-known types
