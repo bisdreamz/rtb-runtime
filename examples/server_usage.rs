@@ -1,7 +1,28 @@
-use actix_web::web;
-use actix_web::web::ServiceConfig;
-use serde::de::Unexpected::Option;
+use actix_web::{web, HttpResponse};
+use actix_web::web::{Json, PayloadConfig, ServiceConfig};
+use openrtb_rs::server::extractors::Protobuf;
 use openrtb_rs::server::server::{Binding, Server, ServerConfig, TlsConfig};
+use openrtb_rs::BidRequest;
+
+fn log_br(req: BidRequest) {
+    println!("{}", serde_json::to_string(&req).unwrap());
+}
+
+async fn proto_bid_handler(req: Protobuf<BidRequest>) -> HttpResponse {
+    // Automatically derefs to &BidRequest
+    println!("Protobuf request");
+    log_br(req.into_inner());
+
+    HttpResponse::Ok().body("Proto OK")
+}
+
+async fn json_bid_handler(req: Json<BidRequest>) -> HttpResponse {
+    // Automatically derefs to &BidRequest
+    println!("Protobuf request");
+    log_br(req.into_inner());
+
+    HttpResponse::Ok().body("Json OK")
+}
 
 #[actix_rt::main]
 async fn main() {
@@ -19,18 +40,28 @@ async fn main() {
         }
     };
 
-    let service = |cfg: &mut ServiceConfig /* Type */| {
-        cfg.route("/hello", web::get().to(|| async { "Hello world!" }));
+    let service = |cfg: &mut ServiceConfig| {
+        cfg
+            // Configure payload limits (512KB max)
+            .app_data(PayloadConfig::new(512 * 1024))
+            // Hello world endpoint
+            .route("/hello", web::get().to(|| async { "Hello world!" }))
+            .service(web::scope("/br")
+                .route("/proto", web::post().to(proto_bid_handler))
+                .route("/json", web::post().to(json_bid_handler))
+            );
     };
 
     let server = Server::listen(cfg, binding, service)
         .await.expect("Should listen");
 
-    println!("Listening!");
+    println!("Server listening on port 80 (HTTP) and 443 (HTTPS)");
+    println!("  - GET  /hello    - Hello world");
+    println!("  - POST /bid      - Protobuf bid request handler");
 
     actix_rt::time::sleep(std::time::Duration::from_secs(60)).await;
 
-    println!("Shutting down...!");
+    println!("Shutting down...");
     server.stop().await;
-    println!("Shut done");
+    println!("Shutdown complete");
 }
