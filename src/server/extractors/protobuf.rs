@@ -37,8 +37,8 @@ const MAX_SIZE: usize = 262_144;
 ///
 /// ```ignore
 /// use actix_web::{web, HttpResponse};
-/// use openrtb_rs::BidRequest;
-/// use openrtb_rs::server::extractors::Protobuf;
+/// use rtb::BidRequest;
+/// use rtb::server::extractors::Protobuf;
 ///
 /// async fn bid_handler(req: Protobuf<BidRequest>) -> HttpResponse {
 ///     // Automatically derefs to &BidRequest

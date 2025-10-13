@@ -1,5 +1,5 @@
-use openrtb_rs::bid_request;
-use openrtb_rs::openrtb::*;
+use rtb::bid_request;
+use rtb::openrtb::*;
 
 fn main() {
     // Create a BidRequest using the builder pattern

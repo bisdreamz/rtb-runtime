@@ -1,8 +1,8 @@
 use actix_web::web::{Json, PayloadConfig, ServiceConfig};
 use actix_web::{HttpResponse, web};
-use openrtb_rs::BidRequest;
-use openrtb_rs::server::extractors::Protobuf;
-use openrtb_rs::server::server::{Server, ServerConfig, TlsConfig};
+use rtb::BidRequest;
+use rtb::server::extractors::Protobuf;
+use rtb::server::server::{Server, ServerConfig, TlsConfig};
 
 fn log_br(req: BidRequest) {
     println!("{}", serde_json::to_string(&req).unwrap());

@@ -8,7 +8,7 @@
 //! handles OpenRTB's quirks (boolean fields as integers, extension fields, etc.):
 //!
 //! ```ignore
-//! use openrtb_rs::BidRequest;
+//! use rtb::BidRequest;
 //!
 //! // Parse OpenRTB JSON
 //! let request: BidRequest = serde_json::from_str(json)?;
@@ -23,7 +23,7 @@
 //! and custom fields easily:
 //!
 //! ```ignore
-//! use openrtb_rs::BidRequest;
+//! use rtb::BidRequest;
 //!
 //! let request: BidRequest = serde_json::from_str(json)?;
 //!

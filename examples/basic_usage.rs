@@ -6,7 +6,7 @@
 //! - Accessing custom extension fields
 //! - Serializing back to JSON
 
-use openrtb_rs::BidRequest;
+use rtb::BidRequest;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Sample OpenRTB bid request JSON (with custom extension fields)

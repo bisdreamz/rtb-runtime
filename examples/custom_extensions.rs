@@ -6,7 +6,7 @@
 //! - Working with nested objects and arrays
 //! - Combining proto and custom fields
 
-use openrtb_rs::BidRequest;
+use rtb::BidRequest;
 use serde::Deserialize;
 
 /// Custom extension struct for impression-level extensions

@@ -3,8 +3,8 @@
 //! These tests verify that the extension system correctly handles both
 //! proto-defined fields and custom fields in real OpenRTB JSON.
 
-use openrtb_rs::BidRequest;
 use prost::Message;
+use rtb::BidRequest;
 
 /// Test parsing a real OpenRTB bid request with custom extension fields
 #[test]
