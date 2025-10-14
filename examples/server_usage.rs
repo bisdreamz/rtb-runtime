@@ -1,7 +1,7 @@
 use actix_web::web::{Json, PayloadConfig, ServiceConfig};
 use actix_web::{HttpResponse, web};
 use rtb::BidRequest;
-use rtb::server::extractors::Protobuf;
+use rtb::server::protobuf::Protobuf;
 use rtb::server::server::{Server, ServerConfig, TlsConfig};
 
 fn log_br(req: BidRequest) {

@@ -57,7 +57,7 @@ if let Some(imp) = request.imp.first() {
 ```rust
 use actix_web::{web, web::Json, HttpResponse, web::ServiceConfig};
 use rtb::BidRequest;
-use rtb::server::extractors::Protobuf;
+use rtb::server::protobuf::Protobuf;
 use rtb::server::{Server, ServerConfig, TlsConfig};
 
 async fn bid_json(Json(request): Json<BidRequest>) -> HttpResponse {

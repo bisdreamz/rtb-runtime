@@ -21,7 +21,7 @@ futures-util = "0.3.31"
 
 [dev-dependencies]
 actix-rt = "2.11.0"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip"] }
 flate2 = "1.0"
 
 [build-dependencies]

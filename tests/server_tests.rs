@@ -1,8 +1,9 @@
 use actix_web::web::{PayloadConfig, ServiceConfig};
 use actix_web::{HttpResponse, web};
 use prost::Message;
-use rtb::BidRequest;
-use rtb::server::extractors::Protobuf;
+use rtb::{BidRequest, BidResponse, bid_response};
+use rtb::common::bidresponsestate::BidResponseState;
+use rtb::server::protobuf::Protobuf;
 use rtb::server::server::{Server, ServerConfig, TlsConfig};
 use std::fs;
 use std::time::Duration;
@@ -258,6 +259,239 @@ async fn test_invalid_protobuf() {
         .unwrap();
 
     assert_eq!(response.status(), 400);
+
+    server.stop().await;
+}
+
+// New handlers that return protobuf responses
+async fn protobuf_responder_handler(req: Protobuf<BidRequest>) -> Protobuf<BidResponse> {
+    let response = BidResponse {
+        id: req.id.clone(),
+        bidid: format!("bid-{}", req.id),
+        nbr: 0,
+        seatbid: vec![bid_response::SeatBid {
+            bid: vec![bid_response::Bid {
+                id: "bid-1".to_string(),
+                impid: req.imp.first().map(|i| i.id.clone()).unwrap_or_default(),
+                price: 1.23,
+                ..Default::default()
+            }],
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+
+    Protobuf(response)
+}
+
+fn configure_responder_services(cfg: &mut ServiceConfig) {
+    cfg.app_data(PayloadConfig::new(512 * 1024))
+        .route("/proto-response", web::post().to(protobuf_responder_handler));
+}
+
+#[actix_rt::test]
+async fn test_protobuf_responder() {
+    let cfg = ServerConfig {
+        http_port: Some(8085),
+        ssl_port: None,
+        tls: None,
+        tcp_backlog: None,
+        max_conns: None,
+        threads: Some(2),
+        tls_rate_per_worker: None,
+    };
+
+    let server = Server::listen(cfg, configure_responder_services)
+        .await
+        .expect("Failed to start server");
+
+    actix_rt::time::sleep(Duration::from_millis(100)).await;
+
+    let response = test_client()
+        .post("http://127.0.0.1:8085/proto-response")
+        .header("Content-Type", "application/protobuf")
+        .body(encode_bid_request())
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), 200);
+    assert_eq!(
+        response.headers().get("content-type").unwrap(),
+        "application/x-protobuf"
+    );
+
+    let body_bytes = response.bytes().await.unwrap();
+    let bid_response = BidResponse::decode(body_bytes.as_ref()).unwrap();
+
+    assert_eq!(bid_response.id, "test-123");
+    assert_eq!(bid_response.bidid, "bid-test-123");
+    assert_eq!(bid_response.seatbid.len(), 1);
+    assert_eq!(bid_response.seatbid[0].bid.len(), 1);
+    assert_eq!(bid_response.seatbid[0].bid[0].id, "bid-1");
+    assert_eq!(bid_response.seatbid[0].bid[0].price, 1.23);
+
+    server.stop().await;
+}
+
+#[actix_rt::test]
+async fn test_protobuf_responder_with_gzip() {
+    let cfg = ServerConfig {
+        http_port: Some(8086),
+        ssl_port: None,
+        tls: None,
+        tcp_backlog: None,
+        max_conns: None,
+        threads: Some(2),
+        tls_rate_per_worker: None,
+    };
+
+    let server = Server::listen(cfg, configure_responder_services)
+        .await
+        .expect("Failed to start server");
+
+    actix_rt::time::sleep(Duration::from_millis(100)).await;
+
+    let response = test_client()
+        .post("http://127.0.0.1:8086/proto-response")
+        .header("Content-Type", "application/protobuf")
+        .header("Accept-Encoding", "gzip")
+        .body(encode_bid_request())
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), 200);
+
+    // Actix Compress middleware should handle gzip if response is large enough
+    let body_bytes = response.bytes().await.unwrap();
+    let bid_response = BidResponse::decode(body_bytes.as_ref()).unwrap();
+
+    assert_eq!(bid_response.id, "test-123");
+    assert_eq!(bid_response.bidid, "bid-test-123");
+
+    server.stop().await;
+}
+
+// Handlers that return BidResponseState variants
+async fn bid_state_handler(req: Protobuf<BidRequest>) -> Protobuf<BidResponseState> {
+    let response = BidResponse {
+        id: req.id.clone(),
+        bidid: format!("bid-{}", req.id),
+        nbr: 0,
+        seatbid: vec![bid_response::SeatBid {
+            bid: vec![bid_response::Bid {
+                id: "bid-1".to_string(),
+                impid: req.imp.first().map(|i| i.id.clone()).unwrap_or_default(),
+                price: 2.50,
+                ..Default::default()
+            }],
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+
+    Protobuf(BidResponseState::Bid(response))
+}
+
+async fn nobid_state_handler(_req: Protobuf<BidRequest>) -> Protobuf<BidResponseState> {
+    Protobuf(BidResponseState::NoBid {
+        nbr: 1, // Technical error
+        desc: Some("Insufficient budget".to_string()),
+    })
+}
+
+fn configure_state_services(cfg: &mut ServiceConfig) {
+    cfg.app_data(PayloadConfig::new(512 * 1024))
+        .route("/bid-state", web::post().to(bid_state_handler))
+        .route("/nobid-state", web::post().to(nobid_state_handler));
+}
+
+/// Verify Protobuf<BidResponseState> responder works for Bid variant
+#[actix_rt::test]
+async fn test_bid_response_state_with_bid() {
+    let cfg = ServerConfig {
+        http_port: Some(8087),
+        ssl_port: None,
+        tls: None,
+        tcp_backlog: None,
+        max_conns: None,
+        threads: Some(2),
+        tls_rate_per_worker: None,
+    };
+
+    let server = Server::listen(cfg, configure_state_services)
+        .await
+        .expect("Failed to start server");
+
+    actix_rt::time::sleep(Duration::from_millis(100)).await;
+
+    let response = test_client()
+        .post("http://127.0.0.1:8087/bid-state")
+        .header("Content-Type", "application/protobuf")
+        .body(encode_bid_request())
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), 200);
+    assert_eq!(
+        response.headers().get("content-type").unwrap(),
+        "application/x-protobuf"
+    );
+
+    let body_bytes = response.bytes().await.unwrap();
+    let bid_response = BidResponse::decode(body_bytes.as_ref()).unwrap();
+
+    // Verify BidResponseState::Bid converted to BidResponse correctly
+    assert_eq!(bid_response.id, "test-123");
+    assert_eq!(bid_response.bidid, "bid-test-123");
+    assert_eq!(bid_response.seatbid.len(), 1);
+    assert_eq!(bid_response.seatbid[0].bid.len(), 1);
+    assert_eq!(bid_response.seatbid[0].bid[0].price, 2.50);
+
+    server.stop().await;
+}
+
+/// Verify Protobuf<BidResponseState> responder works for NoBid variant
+#[actix_rt::test]
+async fn test_bid_response_state_with_nobid() {
+    let cfg = ServerConfig {
+        http_port: Some(8088),
+        ssl_port: None,
+        tls: None,
+        tcp_backlog: None,
+        max_conns: None,
+        threads: Some(2),
+        tls_rate_per_worker: None,
+    };
+
+    let server = Server::listen(cfg, configure_state_services)
+        .await
+        .expect("Failed to start server");
+
+    actix_rt::time::sleep(Duration::from_millis(100)).await;
+
+    let response = test_client()
+        .post("http://127.0.0.1:8088/nobid-state")
+        .header("Content-Type", "application/protobuf")
+        .body(encode_bid_request())
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), 200);
+    assert_eq!(
+        response.headers().get("content-type").unwrap(),
+        "application/x-protobuf"
+    );
+
+    let body_bytes = response.bytes().await.unwrap();
+    let bid_response = BidResponse::decode(body_bytes.as_ref()).unwrap();
+
+    // Verify BidResponseState::NoBid converted to BidResponse with nbr set
+    assert_eq!(bid_response.nbr, 1); // Technical error code
+    assert_eq!(bid_response.seatbid.len(), 0); // No bids present
 
     server.stop().await;
 }

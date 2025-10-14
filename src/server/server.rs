@@ -7,6 +7,7 @@ use std::fs::File;
 use std::io::{BufReader, Cursor};
 use std::path::PathBuf;
 use std::time::Duration;
+use actix_web::middleware::Compress;
 
 const LISTEN_ADDR: &str = "0.0.0.0";
 
@@ -105,9 +106,8 @@ impl Server {
     /// Starts a web listener with the provided config and services
     ///
     /// # Arguments
-    /// * `cfg` - [`ServerConfig`] indicating listen options such as threads, max cons, etc
-    /// * `binding` - [`Binding`] indicating listener support for HTTP, HTTPS, or both.
-    /// * `configure` - Closure accepting an Actix [`ServiceConfig`] which configures path handlers
+    /// * `cfg` - [`ServerConfig`] indicating listen options (ports, threads, TLS, etc)
+    /// * `configure` - Closure accepting an Actix `ServiceConfig` which configures path handlers
     /// see https://actix.rs/docs/application
     ///
     /// # Behavior
@@ -121,7 +121,9 @@ impl Server {
     where
         F: Fn(&mut web::ServiceConfig) + Send + Sync + Clone + 'static,
     {
-        let mut app = HttpServer::new(move || App::new().configure(configure.clone()))
+        let mut app = HttpServer::new(move || App::new()
+            .wrap(Compress::default())
+            .configure(configure.clone()))
             .backlog(cfg.tcp_backlog.unwrap_or(4096))
             .max_connections(cfg.max_conns.unwrap_or(1 << 15))
             .workers(

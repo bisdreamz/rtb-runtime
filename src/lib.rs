@@ -76,3 +76,4 @@ pub use pbjson_types;
 // Internal compatibility layer (not public)
 pub(crate) mod compat;
 pub mod server;
+pub mod common;
