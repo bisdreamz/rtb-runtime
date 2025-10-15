@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-/// Reserved and unused
+/// Unknown error
 pub const NONE: u32 = 0;
 /// Technical error prevented a valid bid response
 pub const TECHNICAL_ERROR: u32 = 1;

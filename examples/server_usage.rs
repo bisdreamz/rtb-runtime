@@ -1,6 +1,8 @@
 use actix_web::web::{Json, PayloadConfig, ServiceConfig};
 use actix_web::{HttpResponse, web};
 use rtb::BidRequest;
+use rtb::common::bidresponsestate::BidResponseState;
+use rtb::server::json::JsonBidResponseState;
 use rtb::server::protobuf::Protobuf;
 use rtb::server::server::{Server, ServerConfig, TlsConfig};
 
@@ -8,20 +10,28 @@ fn log_br(req: BidRequest) {
     println!("{}", serde_json::to_string(&req).unwrap());
 }
 
-async fn proto_bid_handler(req: Protobuf<BidRequest>) -> HttpResponse {
+async fn proto_bid_handler(req: Protobuf<BidRequest>) -> Protobuf<BidResponseState> {
     // Automatically derefs to &BidRequest
     println!("Protobuf request");
     log_br(req.into_inner());
 
-    HttpResponse::Ok().body("Proto OK")
+    Protobuf(BidResponseState::NoBidReason {
+        nbr: 1,
+        desc: Some("Sample Nbr Message".into())
+    })
 }
 
-async fn json_bid_handler(req: Json<BidRequest>) -> HttpResponse {
-    // Automatically derefs to &BidRequest
-    println!("Protobuf request");
+async fn json_bid_handler(req: Json<BidRequest>) -> JsonBidResponseState {
+    println!("Json request");
+
     log_br(req.into_inner());
 
-    HttpResponse::Ok().body("Json OK")
+    JsonBidResponseState(
+        BidResponseState::NoBidReason {
+            nbr: 1,
+            desc: Some("Sample Nbr Message".into())
+        }
+    )
 }
 
 #[actix_rt::main]

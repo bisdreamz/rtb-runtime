@@ -145,7 +145,7 @@ where
     }
 }
 
-/// An actix responder which makes responding with Protobuf<T> messages easy
+/// An actix responder which makes responding with Protobuf<`T`> messages easy
 impl<T: Message> Responder for Protobuf<T> {
     type Body = BoxBody;
 
@@ -156,11 +156,14 @@ impl<T: Message> Responder for Protobuf<T> {
     }
 }
 
-/// Responder to simplify Protobuf<BidResponseState> which handles the required into call
+/// Responder to simplify Protobuf<`BidResponseState`> which handles the required into call
 impl Responder for Protobuf<BidResponseState> {
     type Body = BoxBody;
 
     fn respond_to(self, req: &HttpRequest) -> HttpResponse<Self::Body> {
-        Protobuf::<BidResponse>(self.0.into()).respond_to(req)
+        match Option::<BidResponse>::from(self.0) {
+            Some(bid_response) => Protobuf(bid_response).respond_to(req),
+            None => HttpResponse::NoContent().finish(),
+        }
     }
 }

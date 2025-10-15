@@ -108,7 +108,7 @@ impl Server {
     /// # Arguments
     /// * `cfg` - [`ServerConfig`] indicating listen options (ports, threads, TLS, etc)
     /// * `configure` - Closure accepting an Actix `ServiceConfig` which configures path handlers
-    /// see https://actix.rs/docs/application
+    /// see <https://actix.rs/docs/application>
     ///
     /// # Behavior
     /// Enabling HTTP support automatically enabled H2C support, however requires explicit H2C
