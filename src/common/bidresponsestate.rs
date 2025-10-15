@@ -4,15 +4,40 @@ use crate::BidResponse;
 /// a request has completed evaluation
 pub enum BidResponseState {
     /// Indicates one or more valid bids are present
+    ///
+    /// # Arguments
+    /// A bid response object which may contain either valid bids
+    /// or a manually constructed nbr response
+    ///
+    /// # Behavior
+    /// If returned as `JsonBidResponseState` or `Protobuf` to actix, will
+    /// return an http 200 with the serialized bidresponse
     Bid (BidResponse),
     /// Indicates no bids present for auction with the associated reason
     /// and optional detail message. If paired with the actix server,
     /// will respond with an http200 plus nbr object.
-    NoBidReason { nbr: u32, desc: Option<String> },
+    ///
+    /// # Arguments
+    /// * `reqid` - The id of the corresponding bidrequest
+    /// * `nbr` - The nbr value to return. See [`nobidreasons`]
+    /// * `desc` - An optional description for convenience
+    ///
+    /// # Behavior
+    /// If returned as a `JsonBidResponseState` or `Protobuf` to actix,
+    /// will return http 200 with the nbr object and the
+    /// desc as the http status message if present
+    NoBidReason { reqid: String, nbr: u32, desc: Option<&'static str> },
     /// Indicates no bids present. If paired with actix server,
-    /// this will send an http 204. Optionally attach a reason
-    /// for logging.
-    NoBid { desc: Option<String> },
+    /// this will send an http 204
+    ///
+    /// # Arguments
+    /// * `desc` - An optional description for convenience
+    ///
+    /// # Behavior
+    /// If returned as `JsonBidResponseState` or `Protobuf` to actix,
+    /// will return an http 204 with the desc as the
+    /// http status message if present
+    NoBid { desc: Option<&'static str> },
 }
 
 impl From<BidResponseState> for Option<BidResponse> {

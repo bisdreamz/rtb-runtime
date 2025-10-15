@@ -398,8 +398,9 @@ async fn bid_state_handler(req: Protobuf<BidRequest>) -> Protobuf<BidResponseSta
 
 async fn nobid_state_handler(_req: Protobuf<BidRequest>) -> Protobuf<BidResponseState> {
     Protobuf(BidResponseState::NoBidReason {
+        reqid: "123".to_string(),
         nbr: 1, // Technical error
-        desc: Some("Insufficient budget".to_string()),
+        desc: Some("Insufficient budget"),
     })
 }
 
