@@ -73,7 +73,17 @@ pub use openrtb::*;
 // Re-export pbjson_types for working with google.protobuf.Value (with serde support)
 pub use pbjson_types;
 
+// Re-export actix-web when the feature is enabled so users can access macros and types
+#[cfg(feature = "actix-web")]
+pub use actix_web;
+
 // Internal compatibility layer (not public)
 pub(crate) mod compat;
+
+/// Server-related utilities for building OpenRTB services with actix-web.
+///
+/// Only available when the `actix-web` feature is enabled.
+#[cfg(feature = "actix-web")]
 pub mod server;
+
 pub mod common;

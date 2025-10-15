@@ -10,7 +10,7 @@
 //! `extensions 500 to max;` declarations to signal this flexibility.
 //!
 //! However, prost (the Rust protobuf library) does not yet support extensions
-//! (see https://github.com/tokio-rs/prost/issues/674). Without special handling,
+//! (see <https://github.com/tokio-rs/prost/issues/674>). Without special handling,
 //! any custom fields in the JSON would be silently dropped during parsing, or worse,
 //! cause deserialization to fail.
 //!

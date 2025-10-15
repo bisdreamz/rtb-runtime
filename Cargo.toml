@@ -6,6 +6,14 @@ edition = "2024"
 [lib]
 name = "rtb"
 
+[features]
+default = ["actix-web"]
+actix-web = ["dep:actix-web", "dep:rustls", "dep:rcgen", "dep:rustls-pemfile", "dep:futures-util"]
+
+[[example]]
+name = "server_usage"
+required-features = ["actix-web"]
+
 [dependencies]
 prost = "0.14"
 pbjson = "0.8"
@@ -13,11 +21,11 @@ pbjson-types = "0.8"  # Provides serde for google.protobuf.Value
 derive_builder = "0.20"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-actix-web = { version = "4.11.0", features = ["rustls-0_23"] }
-rustls = { version = "0.23.32", default-features = false, features = ["ring"] }
-rcgen = "0.14.5"
-rustls-pemfile = "2.2.0"
-futures-util = "0.3.31"
+actix-web = { version = "4.11.0", features = ["rustls-0_23"], optional = true }
+rustls = { version = "0.23.32", default-features = false, features = ["ring"], optional = true }
+rcgen = { version = "0.14.5", optional = true }
+rustls-pemfile = { version = "2.2.0", optional = true }
+futures-util = { version = "0.3.31", optional = true }
 
 [dev-dependencies]
 actix-rt = "2.11.0"

@@ -1,3 +1,5 @@
+#![cfg(feature = "actix-web")]
+
 use actix_web::web::{PayloadConfig, ServiceConfig};
 use actix_web::{HttpResponse, web};
 use prost::Message;
