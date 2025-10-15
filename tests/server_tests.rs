@@ -6,7 +6,7 @@ use prost::Message;
 use rtb::{BidRequest, BidResponse, bid_response};
 use rtb::common::bidresponsestate::BidResponseState;
 use rtb::server::protobuf::Protobuf;
-use rtb::server::server::{Server, ServerConfig, TlsConfig};
+use rtb::server::{Server, ServerConfig, TlsConfig};
 use std::fs;
 use std::time::Duration;
 

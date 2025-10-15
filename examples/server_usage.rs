@@ -3,7 +3,7 @@ use actix_web::web;
 use rtb::common::bidresponsestate::BidResponseState;
 use rtb::server::json::JsonBidResponseState;
 use rtb::server::protobuf::Protobuf;
-use rtb::server::server::{Server, ServerConfig, TlsConfig};
+use rtb::server::{Server, ServerConfig, TlsConfig};
 use rtb::BidRequest;
 
 fn log_br(req: &BidRequest) {

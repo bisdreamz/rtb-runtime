@@ -19,7 +19,7 @@ pub enum BidResponseState {
     ///
     /// # Arguments
     /// * `reqid` - The id of the corresponding bidrequest
-    /// * `nbr` - The nbr value to return. See [`nobidreasons`]
+    /// * `nbr` - The nbr value to return. See [`crate::openrtb::spec::nobidreason`]
     /// * `desc` - An optional description for convenience
     ///
     /// # Behavior
