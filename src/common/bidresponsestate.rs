@@ -2,6 +2,7 @@ use crate::BidResponse;
 
 /// Standard enum for representing the state of a bidresponse after
 /// a request has completed evaluation
+#[derive(Debug, Clone)]
 pub enum BidResponseState {
     /// Indicates one or more valid bids are present
     ///

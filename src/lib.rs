@@ -87,3 +87,4 @@ pub(crate) mod compat;
 pub mod server;
 
 pub mod common;
+mod observability;
