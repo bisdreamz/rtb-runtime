@@ -1,4 +1,3 @@
-
 /// Creates a root span based on the provided sampling rate.
 /// This is required because if we simply used the instrument
 /// attribute then it would still do a lot of the heavy lifting
@@ -9,6 +8,7 @@
 /// # Arguments
 /// * `sample_percent` - The percent (0.0 to 1.0) of spans to sample
 /// * `span_name` - The name of the span if created (must be a literal)
+/// * `fields` - Optional span fields (e.g., `field1 = value1, field2 = %value2`)
 ///
 /// # Behavior
 /// - If a parent span exists (is active): ALWAYS creates a child span (preserves complete trace)
@@ -33,6 +33,15 @@ macro_rules! sample_or_attach_root_span {
 
         if !current.is_disabled() || rand::random::<f32>() < $sample_percent {
             tracing::info_span!($span_name)
+        } else {
+            tracing::Span::none()
+        }
+    }};
+        ($sample_percent:expr, $span_name:literal, $($fields:tt)*) => {{
+        let current = tracing::Span::current();
+
+        if !current.is_disabled() || rand::random::<f32>() < $sample_percent {
+            tracing::info_span!($span_name, $($fields)*)
         } else {
             tracing::Span::none()
         }
@@ -253,4 +262,3 @@ macro_rules! child_span_error {
         }
     }};
 }
-

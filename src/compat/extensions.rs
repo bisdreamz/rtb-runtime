@@ -303,6 +303,67 @@ impl DynamicExt {
     pub fn get_string_or(&self, key: &str, default: String) -> String {
         self.get_string(key).unwrap_or(default)
     }
+
+    // ===== Mutation: Insert/Update Fields =====
+
+    /// Insert or update a custom field with a raw JSON value.
+    ///
+    /// Returns the previous value if the key existed.
+    ///
+    /// ```ignore
+    /// use serde_json::json;
+    ///
+    /// let mut ext = DynamicExt::new();
+    /// ext.insert("channel".to_string(), json!(42));
+    /// ext.insert("metadata".to_string(), json!({"version": "1.0"}));
+    /// ```
+    pub fn insert(&mut self, key: String, value: Value) -> Option<Value> {
+        self.inner.insert(key, value)
+    }
+
+    /// Insert a boolean value.
+    pub fn insert_bool(&mut self, key: String, value: bool) {
+        self.inner.insert(key, Value::Bool(value));
+    }
+
+    /// Insert an i64 integer value.
+    pub fn insert_i64(&mut self, key: String, value: i64) {
+        self.inner.insert(key, Value::Number(value.into()));
+    }
+
+    /// Insert a u64 integer value.
+    pub fn insert_u64(&mut self, key: String, value: u64) {
+        self.inner.insert(key, Value::Number(value.into()));
+    }
+
+    /// Insert an f64 floating point value.
+    pub fn insert_f64(&mut self, key: String, value: f64) {
+        if let Some(num) = serde_json::Number::from_f64(value) {
+            self.inner.insert(key, Value::Number(num));
+        }
+    }
+
+    /// Insert a string value.
+    pub fn insert_string(&mut self, key: String, value: String) {
+        self.inner.insert(key, Value::String(value));
+    }
+
+    /// Insert an array value.
+    pub fn insert_array(&mut self, key: String, value: Vec<Value>) {
+        self.inner.insert(key, Value::Array(value));
+    }
+
+    /// Insert a nested object.
+    pub fn insert_object(&mut self, key: String, value: Map<String, Value>) {
+        self.inner.insert(key, Value::Object(value));
+    }
+
+    /// Remove a custom field.
+    ///
+    /// Returns the removed value if the key existed.
+    pub fn remove(&mut self, key: &str) -> Option<Value> {
+        self.inner.remove(key)
+    }
 }
 
 /// Wrapper that combines proto-defined fields with custom extension fields.
@@ -343,6 +404,38 @@ impl<T> ExtWithCustom<T> {
     /// Create a new extension wrapper with both proto and custom fields.
     pub fn with_custom(proto: T, custom: DynamicExt) -> Self {
         Self { proto, custom }
+    }
+
+    /// Builder-style method to add a custom field with a raw JSON value.
+    ///
+    /// ```ignore
+    /// use serde_json::json;
+    ///
+    /// let ext = ExtWithCustom::new(proto)
+    ///     .with_field("force_bid".to_string(), json!(true))
+    ///     .with_field("channel".to_string(), json!(42));
+    /// ```
+    pub fn with_field(mut self, key: String, value: Value) -> Self {
+        self.custom.insert(key, value);
+        self
+    }
+
+    /// Builder-style method to add a boolean custom field.
+    pub fn with_bool(mut self, key: String, value: bool) -> Self {
+        self.custom.insert_bool(key, value);
+        self
+    }
+
+    /// Builder-style method to add an i64 custom field.
+    pub fn with_i64(mut self, key: String, value: i64) -> Self {
+        self.custom.insert_i64(key, value);
+        self
+    }
+
+    /// Builder-style method to add a string custom field.
+    pub fn with_string(mut self, key: String, value: String) -> Self {
+        self.custom.insert_string(key, value);
+        self
     }
 
     /// Access custom/unknown extension fields.
@@ -567,15 +660,73 @@ mod tests {
         let json = r#"{"gpid":"test","custom_field":123}"#;
         let ext: ExtWithCustom<ProtoExt> = serde_json::from_str(json).unwrap();
 
-        // Serialize back
         let serialized = serde_json::to_string(&ext).unwrap();
 
-        // Both proto and custom fields should be present
         assert!(serialized.contains("\"gpid\""));
         assert!(serialized.contains("\"custom_field\""));
 
-        // Round-trip
         let deserialized: ExtWithCustom<ProtoExt> = serde_json::from_str(&serialized).unwrap();
         assert_eq!(ext, deserialized);
+    }
+
+    #[test]
+    fn test_dynamic_ext_insert_methods() {
+        let mut ext = DynamicExt::new();
+
+        ext.insert_bool("force_bid".to_string(), true);
+        ext.insert_i64("channel".to_string(), 42);
+        ext.insert_string("name".to_string(), "test".to_string());
+        ext.insert_f64("price".to_string(), 1.5);
+
+        assert_eq!(ext.get_bool("force_bid"), Some(true));
+        assert_eq!(ext.get_i64("channel"), Some(42));
+        assert_eq!(ext.get_str("name"), Some("test"));
+        assert_eq!(ext.get_f64("price"), Some(1.5));
+
+        let removed = ext.remove("channel");
+        assert_eq!(removed, Some(Value::Number(42.into())));
+        assert_eq!(ext.get_i64("channel"), None);
+    }
+
+    #[test]
+    fn test_ext_with_custom_builder_methods() {
+        #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+        struct ProtoExt {
+            gpid: String,
+        }
+
+        let proto = ProtoExt {
+            gpid: "/homepage/banner".to_string(),
+        };
+
+        let ext = ExtWithCustom::new(proto)
+            .with_bool("force_bid".to_string(), true)
+            .with_i64("channel".to_string(), 42)
+            .with_string("name".to_string(), "test".to_string());
+
+        assert_eq!(ext.gpid, "/homepage/banner");
+        assert_eq!(ext.custom().get_bool("force_bid"), Some(true));
+        assert_eq!(ext.custom().get_i64("channel"), Some(42));
+        assert_eq!(ext.custom().get_str("name"), Some("test"));
+    }
+
+    #[test]
+    fn test_ext_with_custom_mutable_access() {
+        #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+        struct ProtoExt {
+            gpid: String,
+        }
+
+        let proto = ProtoExt {
+            gpid: "/app/video".to_string(),
+        };
+
+        let mut ext = ExtWithCustom::new(proto);
+
+        ext.custom_mut().insert_bool("rewarded".to_string(), true);
+        ext.custom_mut().insert_i64("duration".to_string(), 30);
+
+        assert_eq!(ext.custom().get_bool("rewarded"), Some(true));
+        assert_eq!(ext.custom().get_i64("duration"), Some(30));
     }
 }

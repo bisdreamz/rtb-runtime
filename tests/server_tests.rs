@@ -3,10 +3,10 @@
 use actix_web::web::{PayloadConfig, ServiceConfig};
 use actix_web::{HttpResponse, web};
 use prost::Message;
-use rtb::{BidRequest, BidResponse, bid_response};
 use rtb::common::bidresponsestate::BidResponseState;
 use rtb::server::protobuf::Protobuf;
 use rtb::server::{Server, ServerConfig, TlsConfig};
+use rtb::{BidRequest, BidResponse, bid_response};
 use std::fs;
 use std::time::Duration;
 
@@ -287,8 +287,10 @@ async fn protobuf_responder_handler(req: Protobuf<BidRequest>) -> Protobuf<BidRe
 }
 
 fn configure_responder_services(cfg: &mut ServiceConfig) {
-    cfg.app_data(PayloadConfig::new(512 * 1024))
-        .route("/proto-response", web::post().to(protobuf_responder_handler));
+    cfg.app_data(PayloadConfig::new(512 * 1024)).route(
+        "/proto-response",
+        web::post().to(protobuf_responder_handler),
+    );
 }
 
 #[actix_rt::test]

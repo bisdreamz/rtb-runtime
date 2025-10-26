@@ -1,2 +1,2 @@
-pub mod nobidreason;
 pub mod devicetype;
+pub mod nobidreason;

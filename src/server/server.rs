@@ -1,4 +1,5 @@
 use actix_web::dev::ServerHandle;
+use actix_web::middleware::Compress;
 use actix_web::{App, HttpServer, rt, web};
 use rcgen::generate_simple_self_signed;
 use rustls::pki_types::CertificateDer;
@@ -7,7 +8,6 @@ use std::fs::File;
 use std::io::{BufReader, Cursor};
 use std::path::PathBuf;
 use std::time::Duration;
-use actix_web::middleware::Compress;
 
 const LISTEN_ADDR: &str = "0.0.0.0";
 
@@ -121,18 +121,20 @@ impl Server {
     where
         F: Fn(&mut web::ServiceConfig) + Send + Sync + Clone + 'static,
     {
-        let mut app = HttpServer::new(move || App::new()
-            .wrap(Compress::default())
-            .configure(configure.clone()))
-            .backlog(cfg.tcp_backlog.unwrap_or(4096))
-            .max_connections(cfg.max_conns.unwrap_or(1 << 15))
-            .workers(
-                cfg.threads
-                    .unwrap_or(std::thread::available_parallelism()?.get()),
-            )
-            .client_request_timeout(Duration::from_secs(1))
-            .max_connection_rate(cfg.tls_rate_per_worker.unwrap_or(256))
-            .disable_signals();
+        let mut app = HttpServer::new(move || {
+            App::new()
+                .wrap(Compress::default())
+                .configure(configure.clone())
+        })
+        .backlog(cfg.tcp_backlog.unwrap_or(4096))
+        .max_connections(cfg.max_conns.unwrap_or(1 << 15))
+        .workers(
+            cfg.threads
+                .unwrap_or(std::thread::available_parallelism()?.get()),
+        )
+        .client_request_timeout(Duration::from_secs(1))
+        .max_connection_rate(cfg.tls_rate_per_worker.unwrap_or(256))
+        .disable_signals();
 
         if let Some(http_port) = cfg.http_port {
             app = app.bind_auto_h2c((LISTEN_ADDR, http_port))?;

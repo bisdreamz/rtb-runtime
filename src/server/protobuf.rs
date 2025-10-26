@@ -1,3 +1,6 @@
+use crate::BidResponse;
+use crate::common::bidresponsestate::BidResponseState;
+use actix_web::body::BoxBody;
 use actix_web::dev::Payload;
 use actix_web::web::Bytes;
 use actix_web::{FromRequest, HttpRequest, HttpResponse, Responder, ResponseError};
@@ -5,9 +8,6 @@ use futures_util::future::LocalBoxFuture;
 use prost::Message;
 use std::fmt;
 use std::ops::Deref;
-use actix_web::body::BoxBody;
-use crate::BidResponse;
-use crate::common::bidresponsestate::BidResponseState;
 
 /// Maximum payload size after decompression (256KB)
 ///

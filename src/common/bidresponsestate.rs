@@ -13,7 +13,7 @@ pub enum BidResponseState {
     /// # Behavior
     /// If returned as `JsonBidResponseState` or `Protobuf` to actix, will
     /// return an http 200 with the serialized bidresponse
-    Bid (BidResponse),
+    Bid(BidResponse),
     /// Indicates no bids present for auction with the associated reason
     /// and optional detail message. If paired with the actix server,
     /// will respond with an http200 plus nbr object.
@@ -27,7 +27,11 @@ pub enum BidResponseState {
     /// If returned as a `JsonBidResponseState` or `Protobuf` to actix,
     /// will return http 200 with the nbr object and the
     /// desc as the http status message if present
-    NoBidReason { reqid: String, nbr: u32, desc: Option<&'static str> },
+    NoBidReason {
+        reqid: String,
+        nbr: u32,
+        desc: Option<&'static str>,
+    },
     /// Indicates no bids present. If paired with actix server,
     /// this will send an http 204
     ///
@@ -44,14 +48,12 @@ pub enum BidResponseState {
 impl From<BidResponseState> for Option<BidResponse> {
     fn from(value: BidResponseState) -> Self {
         match value {
-            BidResponseState::Bid (b) => Some(b),
-            BidResponseState::NoBidReason { nbr, .. } => {
-                Some(BidResponse {
-                    nbr: nbr as i32,
-                    ..Default::default()
-                })
-            },
-            BidResponseState::NoBid { .. } => None
+            BidResponseState::Bid(b) => Some(b),
+            BidResponseState::NoBidReason { nbr, .. } => Some(BidResponse {
+                nbr: nbr as i32,
+                ..Default::default()
+            }),
+            BidResponseState::NoBid { .. } => None,
         }
     }
 }
