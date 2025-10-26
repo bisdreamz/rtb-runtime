@@ -57,6 +57,12 @@
 /// generated from the official protobuf specification.
 pub mod openrtb;
 
+/// AdCom (Advertising Common Object Model) specification constants.
+///
+/// This module contains enumerations and constants from the IAB Tech Lab AdCom 1.0
+/// specification, which is referenced by OpenRTB 2.x for various list values.
+pub mod adcom;
+
 /// Extension field support for custom OpenRTB fields.
 ///
 /// This module provides utilities for accessing both standard proto-defined fields
@@ -65,6 +71,23 @@ pub mod openrtb;
 /// See the module documentation for detailed usage examples.
 pub mod extensions {
     pub use crate::compat::extensions::*;
+}
+
+/// Specification constants and enumerations.
+///
+/// Provides easy access to OpenRTB and AdCom specification constants:
+/// - `spec::openrtb` - OpenRTB constants (macros, no-bid reasons, etc.)
+/// - `spec::adcom` - AdCom constants (device types, etc.)
+pub mod spec {
+    /// OpenRTB specification constants
+    pub mod openrtb {
+        pub use crate::openrtb::spec::*;
+    }
+
+    /// AdCom specification constants
+    pub mod adcom {
+        pub use crate::adcom::spec::*;
+    }
 }
 
 // Re-export all OpenRTB types at the crate root for convenience
@@ -79,6 +102,9 @@ pub use actix_web;
 
 // Internal compatibility layer (not public)
 pub(crate) mod compat;
+
+// Shared macros
+mod macros;
 
 /// Server-related utilities for building OpenRTB services with actix-web.
 ///
