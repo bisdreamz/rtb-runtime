@@ -1693,6 +1693,7 @@ dependencies = [
  "flate2",
  "futures-util",
  "heck",
+ "memchr",
  "pbjson",
  "pbjson-build",
  "pbjson-types",
