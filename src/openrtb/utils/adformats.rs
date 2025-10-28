@@ -1,11 +1,11 @@
-use crate::bid_response::bid::AdmOneof;
 use crate::bid_response::Bid;
+use crate::bid_response::bid::AdmOneof;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AdFormat {
     Banner,
     Video,
-    Native
+    Native,
 }
 
 fn is_vast(adm: &str) -> bool {
@@ -60,7 +60,7 @@ fn classify_adm(adm: &AdmOneof) -> Option<AdFormat> {
 pub fn detect_ad_format(bid: &'_ Bid) -> Option<AdFormat> {
     let adm = match &bid.adm_oneof {
         Some(adm) => adm,
-        None => return None
+        None => return None,
     };
 
     classify_adm(adm)
@@ -92,7 +92,9 @@ mod tests {
             id: "banner-bid-2".to_string(),
             impid: "imp-1".to_string(),
             price: 1.0,
-            adm_oneof: Some(AdmOneof::Adm(r#"<a href="https://example.com"><img src="banner.jpg"></a>"#.to_string())),
+            adm_oneof: Some(AdmOneof::Adm(
+                r#"<a href="https://example.com"><img src="banner.jpg"></a>"#.to_string(),
+            )),
             ..Default::default()
         };
 
