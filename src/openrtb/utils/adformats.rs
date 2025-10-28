@@ -1,6 +1,7 @@
 use crate::bid_response::bid::AdmOneof;
 use crate::bid_response::Bid;
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum AdFormat {
     Banner,
     Video,
