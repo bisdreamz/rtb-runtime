@@ -1,7 +1,7 @@
-use serde::{Deserialize, Serialize};
-use strum::{Display, EnumString};
 use crate::bid_response::Bid;
 use crate::bid_response::bid::AdmOneof;
+use serde::{Deserialize, Serialize};
+use strum::{Display, EnumString};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, EnumString, Display)]
 #[strum(ascii_case_insensitive)]

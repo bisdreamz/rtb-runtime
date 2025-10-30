@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow, bail, Error};
+use anyhow::{Error, Result, anyhow, bail};
 use url::Url;
 
 /// A URL builder that supports typed key-value pairs with finalization semantics.
