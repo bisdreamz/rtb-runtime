@@ -1,7 +1,10 @@
+use serde::{Deserialize, Serialize};
+use strum::{Display, EnumString};
 use crate::bid_response::Bid;
 use crate::bid_response::bid::AdmOneof;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, EnumString, Display)]
+#[strum(ascii_case_insensitive)]
 pub enum AdFormat {
     Banner,
     Video,

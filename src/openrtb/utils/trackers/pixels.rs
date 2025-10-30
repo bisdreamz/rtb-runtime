@@ -42,7 +42,7 @@ fn validate_url(url: &str) -> Result<(), PixelError> {
 ///
 /// # Example
 /// ```
-/// use rtb::openrtb::utils::html_pixel;
+/// use rtb::openrtb::utils::trackers::html_pixel;
 ///
 /// let html = html_pixel("https://example.com/track?id=123").unwrap();
 /// assert!(html.contains("https://example.com/track?id=123"));
