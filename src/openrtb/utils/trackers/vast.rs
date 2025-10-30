@@ -1,9 +1,9 @@
+use anyhow::{Result, bail};
 use derive_builder::Builder;
 use quick_xml::events::{BytesCData, BytesEnd, BytesStart, Event};
 use quick_xml::{Reader, Writer};
 use serde::{Deserialize, Serialize};
 use std::io::Cursor;
-use anyhow::{bail, Error};
 
 /// VAST tracking event URLs to inject into a VAST video document
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default, Builder)]
@@ -69,50 +69,253 @@ pub struct VastTrackers {
     pub click_tracking: Option<String>,
 }
 
-/// Injects tracking URLs into a VAST 2.0+ XML document
-///
-/// Trackers are injected where applicable based on ad structure:
-/// - **Impression**: Injected at InLine/Wrapper level (applies to all ad types)
-/// - **Error**: Injected at InLine/Wrapper level (applies to all ad types)
-/// - **Video events** (start, quartiles, complete, etc.): Injected into Linear <TrackingEvents> if present
-/// - **Click tracking**: Injected into NonLinear ads as <NonLinearClickTracking> if present
-///
-/// If a tracker type doesn't apply to the ad structure (e.g., video events for NonLinear-only ads),
-/// it's silently skipped. This allows you to provide a complete set of trackers without knowing
-/// the ad type in advance.
-///
-/// All URLs are wrapped in CDATA sections to prevent entity encoding of special characters like `&`.
-///
-/// Compatible with VAST 2.0, 3.0, and 4.0 specifications.
+/// Injects tracking URLs into a VAST 2.0+ XML document.
+/// Applies inline, wrapper, and linear event trackers where the spec allows, wrapping
+/// all URLs in CDATA to preserve special characters.
 ///
 /// # Errors
 /// Returns an error if:
 /// - XML parsing fails
 /// - No InLine or Wrapper tag is found
-pub fn inject_vast_trackers(vast_xml: &str, trackers: &VastTrackers) -> Result<String, Error> {
+
+const INLINE_ALLOWED_PREFIX: &[&[u8]] = &[
+    b"AdSystem",
+    b"AdTitle",
+    b"AdServingId",
+    b"Category",
+    b"Categories",
+    b"Description",
+    b"Advertiser",
+    b"Pricing",
+    b"Survey",
+    b"Error",
+    b"Impression",
+];
+
+const WRAPPER_ALLOWED_PREFIX: &[&[u8]] = &[
+    b"AdSystem",
+    b"VASTAdTagURI",
+    b"AdServingId",
+    b"Category",
+    b"Categories",
+    b"Description",
+    b"Pricing",
+    b"Survey",
+    b"Error",
+    b"Impression",
+];
+
+#[derive(Debug)]
+enum AdContainerKind {
+    Inline,
+    Wrapper,
+}
+
+struct AdContainerState<'a> {
+    kind: AdContainerKind,
+    impression: Option<&'a str>,
+    error: Option<&'a str>,
+    impression_injected: bool,
+    error_injected: bool,
+    seen_vast_ad_tag_uri: bool,
+}
+
+impl<'a> AdContainerState<'a> {
+    fn new(kind: AdContainerKind, trackers: &'a VastTrackers) -> Self {
+        Self {
+            kind,
+            impression: trackers.impression.as_deref(),
+            error: trackers.error.as_deref(),
+            impression_injected: false,
+            error_injected: false,
+            seen_vast_ad_tag_uri: false,
+        }
+    }
+
+    fn has_pending(&self) -> bool {
+        (self.impression.is_some() && !self.impression_injected)
+            || (self.error.is_some() && !self.error_injected)
+    }
+
+    fn inject_if_needed<W: std::io::Write>(
+        &mut self,
+        writer: &mut Writer<W>,
+        impression_injected: &mut bool,
+        error_injected: &mut bool,
+    ) -> Result<()> {
+        if !self.has_pending() {
+            return Ok(());
+        }
+
+        if let Some(url) = self.impression {
+            if !self.impression_injected {
+                write_element(writer, "Impression", url)?;
+                self.impression_injected = true;
+                *impression_injected = true;
+            }
+        }
+
+        if let Some(url) = self.error {
+            if !self.error_injected {
+                write_element(writer, "Error", url)?;
+                self.error_injected = true;
+                *error_injected = true;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn should_skip_child(&self, child_name: &[u8]) -> bool {
+        let allowed = match self.kind {
+            AdContainerKind::Inline => INLINE_ALLOWED_PREFIX,
+            AdContainerKind::Wrapper => WRAPPER_ALLOWED_PREFIX,
+        };
+
+        allowed.iter().any(|tag| *tag == child_name)
+    }
+
+    fn maybe_inject_before_child<W: std::io::Write>(
+        &mut self,
+        child_name: &[u8],
+        current_depth: usize,
+        writer: &mut Writer<W>,
+        impression_injected: &mut bool,
+        error_injected: &mut bool,
+    ) -> Result<()> {
+        if current_depth != 0 || !self.has_pending() {
+            return Ok(());
+        }
+
+        if matches!(self.kind, AdContainerKind::Wrapper) && !self.seen_vast_ad_tag_uri {
+            return Ok(());
+        }
+
+        if self.should_skip_child(child_name) {
+            return Ok(());
+        }
+
+        self.inject_if_needed(writer, impression_injected, error_injected)
+    }
+
+    fn on_direct_child_end(&mut self, child_name: &[u8]) {
+        if matches!(self.kind, AdContainerKind::Wrapper) && child_name == b"VASTAdTagURI" {
+            self.seen_vast_ad_tag_uri = true;
+        }
+    }
+
+    fn finalize<W: std::io::Write>(
+        &mut self,
+        writer: &mut Writer<W>,
+        impression_injected: &mut bool,
+        error_injected: &mut bool,
+    ) -> Result<()> {
+        self.inject_if_needed(writer, impression_injected, error_injected)
+    }
+}
+
+pub fn inject_vast_trackers(vast_xml: &str, trackers: &VastTrackers) -> Result<String> {
     let mut reader = Reader::from_str(vast_xml);
     reader.config_mut().trim_text(true);
+    reader.config_mut().expand_empty_elements = true;
 
     let mut writer = Writer::new(Cursor::new(Vec::new()));
     let mut buf = Vec::new();
 
     let mut found_ad_container = false;
-    let mut injected_impression = false;
-    let mut injected_error = false;
+    let mut impression_injected = false;
+    let mut error_injected = false;
+
+    let mut ad_state: Option<AdContainerState> = None;
+    let mut ad_direct_depth: usize = 0;
+    let mut non_linear_depth: usize = 0;
+    let click_tracking_url = trackers.click_tracking.as_deref();
 
     loop {
         match reader.read_event_into(&mut buf)? {
             Event::Start(ref e) => {
-                process_start_event(
-                    e,
-                    &mut writer,
-                    trackers,
-                    &mut found_ad_container,
-                    &mut injected_impression,
-                    &mut injected_error,
-                )?;
+                let name = e.name();
+                let name_slice = name.as_ref();
+
+                let is_ad_container = name_slice == b"InLine" || name_slice == b"Wrapper";
+                if is_ad_container {
+                    found_ad_container = true;
+                    writer.write_event(Event::Start(e.clone()))?;
+
+                    let kind = if name_slice == b"InLine" {
+                        AdContainerKind::Inline
+                    } else {
+                        AdContainerKind::Wrapper
+                    };
+
+                    ad_state = Some(AdContainerState::new(kind, trackers));
+                    ad_direct_depth = 0;
+                    continue;
+                }
+
+                if let Some(ref mut state) = ad_state {
+                    state.maybe_inject_before_child(
+                        name_slice,
+                        ad_direct_depth,
+                        &mut writer,
+                        &mut impression_injected,
+                        &mut error_injected,
+                    )?;
+                    ad_direct_depth += 1;
+                }
+
+                if name_slice == b"TrackingEvents" {
+                    writer.write_event(Event::Start(e.clone()))?;
+                    inject_video_events(&mut writer, trackers)?;
+                } else if name_slice == b"NonLinear" {
+                    writer.write_event(Event::Start(e.clone()))?;
+                    if click_tracking_url.is_some() {
+                        non_linear_depth += 1;
+                    }
+                } else {
+                    writer.write_event(Event::Start(e.clone()))?;
+                }
             }
             Event::End(ref e) => {
+                let name = e.name();
+                let name_slice = name.as_ref();
+
+                let is_ad_container = name_slice == b"InLine" || name_slice == b"Wrapper";
+                if is_ad_container {
+                    if let Some(ref mut state) = ad_state {
+                        state.finalize(
+                            &mut writer,
+                            &mut impression_injected,
+                            &mut error_injected,
+                        )?;
+                    }
+
+                    writer.write_event(Event::End(e.clone()))?;
+                    ad_state = None;
+                    ad_direct_depth = 0;
+                    non_linear_depth = 0;
+                    continue;
+                }
+
+                if let Some(ref mut state) = ad_state {
+                    if ad_direct_depth == 1 {
+                        state.on_direct_child_end(name_slice);
+                    }
+
+                    if ad_direct_depth > 0 {
+                        ad_direct_depth -= 1;
+                    }
+                }
+
+                if name_slice == b"NonLinear" {
+                    if let Some(url) = click_tracking_url {
+                        if non_linear_depth > 0 {
+                            non_linear_depth -= 1;
+                            write_element(&mut writer, "NonLinearClickTracking", url)?;
+                        }
+                    }
+                }
+
                 writer.write_event(Event::End(e.clone()))?;
             }
             Event::Eof => break,
@@ -121,28 +324,20 @@ pub fn inject_vast_trackers(vast_xml: &str, trackers: &VastTrackers) -> Result<S
         buf.clear();
     }
 
-    // Validate injection success
     if !found_ad_container {
         bail!("No InLine or Wrapper tag found in VAST XML");
     }
 
-    // Validate that applicable trackers were injected
-    // Impression and Error apply to ALL ad types, so if provided they MUST be injected
-    if trackers.impression.is_some() && !injected_impression {
+    if trackers.impression.is_some() && !impression_injected {
         bail!(
             "Impression tracker was provided but could not be injected - VAST structure may be invalid"
         );
     }
-    if trackers.error.is_some() && !injected_error {
+    if trackers.error.is_some() && !error_injected {
         bail!(
             "Error tracker was provided but could not be injected - VAST structure may be invalid"
         );
     }
-
-    // Note: Video events and click tracking are ad-type specific
-    // They're injected where applicable, silently skipped if not:
-    // - Video events: Injected if TrackingEvents found (Linear ads)
-    // - Click tracking: Injected if NonLinear found
 
     let output = writer.into_inner().into_inner();
     String::from_utf8(output).map_err(|e| e.into())
@@ -153,7 +348,7 @@ fn write_element<W: std::io::Write>(
     writer: &mut Writer<W>,
     tag: &str,
     content: &str,
-) -> Result<(), Error> {
+) -> Result<()> {
     writer.write_event(Event::Start(BytesStart::new(tag)))?;
     writer.write_event(Event::CData(BytesCData::new(content)))?;
     writer.write_event(Event::End(BytesEnd::new(tag)))?;
@@ -165,7 +360,7 @@ fn inject_tracking_event<W: std::io::Write>(
     writer: &mut Writer<W>,
     event_type: &str,
     url: &Option<String>,
-) -> Result<(), Error> {
+) -> Result<()> {
     if let Some(url) = url {
         let mut elem = BytesStart::new("Tracking");
         elem.push_attribute(("event", event_type));
@@ -176,32 +371,11 @@ fn inject_tracking_event<W: std::io::Write>(
     Ok(())
 }
 
-/// Inject impression and error trackers at InLine/Wrapper level
-fn inject_ad_level_trackers<W: std::io::Write>(
-    writer: &mut Writer<W>,
-    trackers: &VastTrackers,
-) -> Result<(bool, bool), Error> {
-    let mut injected_impression = false;
-    let mut injected_error = false;
-
-    if let Some(url) = &trackers.impression {
-        write_element(writer, "Impression", url)?;
-        injected_impression = true;
-    }
-
-    if let Some(url) = &trackers.error {
-        write_element(writer, "Error", url)?;
-        injected_error = true;
-    }
-
-    Ok((injected_impression, injected_error))
-}
-
 /// Inject all video event trackers into Linear TrackingEvents
 fn inject_video_events<W: std::io::Write>(
     writer: &mut Writer<W>,
     trackers: &VastTrackers,
-) -> Result<(), Error> {
+) -> Result<()> {
     inject_tracking_event(writer, "start", &trackers.start)?;
     inject_tracking_event(writer, "firstQuartile", &trackers.first_quartile)?;
     inject_tracking_event(writer, "midpoint", &trackers.midpoint)?;
@@ -214,38 +388,6 @@ fn inject_video_events<W: std::io::Write>(
     inject_tracking_event(writer, "rewind", &trackers.rewind)?;
     inject_tracking_event(writer, "skip", &trackers.skip)?;
     inject_tracking_event(writer, "closeLinear", &trackers.close_linear)?;
-    Ok(())
-}
-
-/// Process a single XML start event and inject trackers where appropriate
-fn process_start_event<W: std::io::Write>(
-    event: &BytesStart,
-    writer: &mut Writer<W>,
-    trackers: &VastTrackers,
-    found_ad_container: &mut bool,
-    injected_impression: &mut bool,
-    injected_error: &mut bool,
-) -> Result<(), Error> {
-    let name = event.name();
-
-    if name.as_ref() == b"InLine" || name.as_ref() == b"Wrapper" {
-        *found_ad_container = true;
-        writer.write_event(Event::Start(event.clone()))?;
-        let (imp, err) = inject_ad_level_trackers(writer, trackers)?;
-        *injected_impression = imp;
-        *injected_error = err;
-    } else if name.as_ref() == b"TrackingEvents" {
-        writer.write_event(Event::Start(event.clone()))?;
-        inject_video_events(writer, trackers)?;
-    } else if name.as_ref() == b"NonLinear" {
-        writer.write_event(Event::Start(event.clone()))?;
-        if let Some(url) = &trackers.click_tracking {
-            write_element(writer, "NonLinearClickTracking", url)?;
-        }
-    } else {
-        writer.write_event(Event::Start(event.clone()))?;
-    }
-
     Ok(())
 }
 
@@ -265,6 +407,27 @@ mod tests {
             <Duration>00:00:15</Duration>
             <TrackingEvents>
             </TrackingEvents>
+            <MediaFiles>
+              <MediaFile>https://example.com/video.mp4</MediaFile>
+            </MediaFiles>
+          </Linear>
+        </Creative>
+      </Creatives>
+    </InLine>
+  </Ad>
+</VAST>"#;
+
+    const VAST_INLINE_EMPTY_TRACKING: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<VAST version="4.0">
+  <Ad id="emptyTracking">
+    <InLine>
+      <AdSystem>Test Ad System</AdSystem>
+      <AdTitle>Test Ad</AdTitle>
+      <Creatives>
+        <Creative>
+          <Linear>
+            <Duration>00:00:15</Duration>
+            <TrackingEvents/>
             <MediaFiles>
               <MediaFile>https://example.com/video.mp4</MediaFile>
             </MediaFiles>
@@ -309,6 +472,25 @@ mod tests {
     }
 
     #[test]
+    fn test_impression_preserves_header_order() {
+        let trackers = VastTrackersBuilder::default()
+            .impression(Some("https://billing.example.com/imp?id=order".to_string()))
+            .build()
+            .unwrap();
+
+        let result = inject_vast_trackers(VAST_INLINE, &trackers).unwrap();
+
+        let ad_system_pos = result.find("<AdSystem>").unwrap();
+        let impression_pos = result
+            .find("<Impression><![CDATA[https://billing.example.com/imp?id=order]]></Impression>")
+            .unwrap();
+        let creatives_pos = result.find("<Creatives>").unwrap();
+
+        assert!(ad_system_pos < impression_pos);
+        assert!(impression_pos < creatives_pos);
+    }
+
+    #[test]
     fn test_inject_impression_wrapper() {
         let trackers = VastTrackersBuilder::default()
             .impression(Some("https://billing.example.com/imp?id=456".to_string()))
@@ -321,6 +503,25 @@ mod tests {
             "<Impression><![CDATA[https://billing.example.com/imp?id=456]]></Impression>"
         ));
         assert!(result.contains("<Wrapper>"));
+    }
+
+    #[test]
+    fn test_wrapper_impression_after_vast_ad_tag_uri() {
+        let trackers = VastTrackersBuilder::default()
+            .impression(Some(
+                "https://billing.example.com/imp?id=wrapper-order".to_string(),
+            ))
+            .build()
+            .unwrap();
+
+        let result = inject_vast_trackers(VAST_WRAPPER, &trackers).unwrap();
+
+        let vast_uri_pos = result.find("<VASTAdTagURI>").unwrap();
+        let impression_pos = result
+            .find("<Impression><![CDATA[https://billing.example.com/imp?id=wrapper-order]]></Impression>")
+            .unwrap();
+
+        assert!(vast_uri_pos < impression_pos);
     }
 
     #[test]
@@ -359,6 +560,20 @@ mod tests {
         ));
         assert!(result.contains(r#"<Tracking event="thirdQuartile"><![CDATA[https://billing.example.com/q3]]></Tracking>"#));
         assert!(result.contains(r#"<Tracking event="complete"><![CDATA[https://billing.example.com/complete]]></Tracking>"#));
+    }
+
+    #[test]
+    fn test_tracking_events_self_closing_injects() {
+        let trackers = VastTrackersBuilder::default()
+            .start(Some("https://billing.example.com/start".to_string()))
+            .build()
+            .unwrap();
+
+        let result = inject_vast_trackers(VAST_INLINE_EMPTY_TRACKING, &trackers).unwrap();
+
+        assert!(result.contains(
+            r#"<Tracking event="start"><![CDATA[https://billing.example.com/start]]></Tracking>"#
+        ));
     }
 
     #[test]
@@ -411,7 +626,6 @@ mod tests {
 
         let result = inject_vast_trackers(VAST_INLINE, &trackers).unwrap();
 
-        // Should succeed but not inject anything
         assert!(result.contains("<InLine>"));
         assert!(!result.contains("<Impression>"));
     }
@@ -450,7 +664,6 @@ mod tests {
 
         let result = inject_vast_trackers(VAST_INLINE, &trackers).unwrap();
 
-        // Should be parseable XML - try to read all events without error
         let mut reader = Reader::from_str(&result);
         let mut buf = Vec::new();
         loop {
@@ -474,9 +687,7 @@ mod tests {
 
         let result = inject_vast_trackers(VAST_INLINE, &trackers).unwrap();
 
-        // Should contain CDATA with unescaped ampersands
         assert!(result.contains(&format!("<![CDATA[{}]]>", url)));
-        // Should NOT contain entity-encoded ampersands
         assert!(!result.contains("&amp;"));
     }
 
@@ -509,7 +720,6 @@ mod tests {
 
         let result = inject_vast_trackers(VAST_NONLINEAR, &trackers).unwrap();
 
-        // Impression should be injected at InLine level (works for both Linear and NonLinear)
         assert!(
             result.contains("<Impression><![CDATA[https://billing.example.com/imp]]></Impression>")
         );
@@ -524,8 +734,12 @@ mod tests {
 
         let result = inject_vast_trackers(VAST_NONLINEAR, &trackers).unwrap();
 
-        // Click tracking should be injected into NonLinear element
-        assert!(result.contains("<NonLinearClickTracking><![CDATA[https://billing.example.com/click]]></NonLinearClickTracking>"));
+        let click_through_pos = result.find("<NonLinearClickThrough>").unwrap();
+        let click_tracking_markup = "<NonLinearClickTracking><![CDATA[https://billing.example.com/click]]></NonLinearClickTracking>";
+        let click_tracking_pos = result.find(click_tracking_markup).unwrap();
+
+        assert!(click_through_pos < click_tracking_pos);
+        assert!(result.contains(click_tracking_markup));
     }
 
     #[test]
@@ -546,7 +760,6 @@ mod tests {
 
     #[test]
     fn test_video_events_skipped_for_nonlinear() {
-        // Video events should be silently skipped for NonLinear-only ads
         let trackers = VastTrackersBuilder::default()
             .impression(Some("https://billing.example.com/imp".to_string()))
             .start(Some("https://billing.example.com/start".to_string()))
@@ -556,12 +769,10 @@ mod tests {
 
         let result = inject_vast_trackers(VAST_NONLINEAR, &trackers).unwrap();
 
-        // Impression should be injected (applies to all ad types)
         assert!(
             result.contains("<Impression><![CDATA[https://billing.example.com/imp]]></Impression>")
         );
 
-        // Video events should NOT be injected (no TrackingEvents in NonLinear-only ad)
         assert!(!result.contains("event=\"start\""));
         assert!(!result.contains("event=\"complete\""));
     }
@@ -588,7 +799,6 @@ mod tests {
 
     #[test]
     fn test_adds_to_existing_trackers() {
-        // Should ADD our trackers to existing ones, not replace
         let trackers = VastTrackersBuilder::default()
             .impression(Some("https://billing.example.com/imp".to_string()))
             .start(Some("https://billing.example.com/start".to_string()))
@@ -597,23 +807,18 @@ mod tests {
 
         let result = inject_vast_trackers(VAST_WITH_EXISTING_TRACKERS, &trackers).unwrap();
 
-        // Both our new trackers should be present
         assert!(result.contains("<![CDATA[https://billing.example.com/imp]]>"));
         assert!(result.contains("<![CDATA[https://billing.example.com/start]]>"));
 
-        // Existing trackers should still be present
         assert!(result.contains("<![CDATA[https://existing.com/imp]]>"));
         assert!(result.contains("<![CDATA[https://existing.com/start]]>"));
         assert!(result.contains("<![CDATA[https://existing.com/complete]]>"));
 
-        // Should have 2 impression trackers (ours + existing)
         assert_eq!(result.matches("<Impression>").count(), 2);
     }
 
     #[test]
     fn test_error_no_tracking_events() {
-        // This test was updated - we now removed the old validation that errored here
-        // Now we just verify the original test case still works
         let vast_no_tracking = r#"<?xml version="1.0"?>
 <VAST version="4.0">
   <Ad id="123">
@@ -637,11 +842,9 @@ mod tests {
             .build()
             .unwrap();
 
-        // Should succeed even though there's no TrackingEvents - video events just won't be injected
         let result = inject_vast_trackers(vast_no_tracking, &trackers);
         assert!(result.is_ok());
 
-        // Video events should not be in result
         let output = result.unwrap();
         assert!(!output.contains("event=\"start\""));
     }

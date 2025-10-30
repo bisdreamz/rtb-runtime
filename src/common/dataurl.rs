@@ -31,7 +31,7 @@ pub struct DataUrl {
 impl DataUrl {
     /// Creates a new DataUrl from a domain and path.
     ///
-    /// The domain should not include a protocol (e.g., "example.com", not "https://example.com").
+    /// The domain should not include a protocol (e.g., "example.com", not "http(s)://example.com").
     /// Slashes are handled automatically - both "beacon" and "/beacon" are valid paths.
     ///
     /// # Arguments
