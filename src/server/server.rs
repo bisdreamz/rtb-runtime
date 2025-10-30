@@ -4,14 +4,17 @@ use actix_web::{App, HttpServer, rt, web};
 use rcgen::generate_simple_self_signed;
 use rustls::pki_types::CertificateDer;
 use rustls_pemfile::{certs, private_key};
+use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::{BufReader, Cursor};
 use std::path::PathBuf;
 use std::time::Duration;
+use strum::{AsRefStr, Display, EnumString};
 
 const LISTEN_ADDR: &str = "0.0.0.0";
 
 /// Configure TLS options
+#[derive(Debug, Clone, Serialize, Deserialize, EnumString, AsRefStr, Display)]
 pub enum TlsConfig {
     /// Auto generated self signed for testing http2/ssl
     SelfSigned { hosts: Vec<String> },
@@ -23,6 +26,7 @@ pub enum TlsConfig {
 }
 
 /// Configures server limit options
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerConfig {
     /// Port to attach http listener to. If none, will not accept plain http traffic
     pub http_port: Option<u16>,
