@@ -15,6 +15,7 @@ const LISTEN_ADDR: &str = "0.0.0.0";
 
 /// Configure TLS options
 #[derive(Debug, Clone, Serialize, Deserialize, EnumString, AsRefStr, Display)]
+#[serde(rename_all = "lowercase")]
 pub enum TlsConfig {
     /// Auto generated self signed for testing http2/ssl
     SelfSigned { hosts: Vec<String> },
