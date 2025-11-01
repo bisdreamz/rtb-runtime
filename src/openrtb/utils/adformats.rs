@@ -8,6 +8,7 @@ use strum::{Display, EnumString};
 pub enum AdFormat {
     Banner,
     Video,
+    Audio,
     Native,
 }
 
