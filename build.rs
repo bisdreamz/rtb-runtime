@@ -189,8 +189,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ext_fields = collect_ext_field_info(&descriptor_set)?;
     let serde_path = out_dir.join("com.iabtechlab.openrtb.v2.serde.rs");
     patch_pbjson_bool_handling(&serde_path, &bool_fields)?;
+    patch_inline_hints(&serde_path)?;
 
-    // Patch extension fields to use ExtWithCustom wrapper (in prost-generated file)
     let proto_path = out_dir.join("com.iabtechlab.openrtb.v2.rs");
     patch_ext_wrapper(&proto_path, &ext_fields)?;
 
@@ -455,6 +455,46 @@ fn brace_delta(line: &str) -> i32 {
         '}' => acc - 1,
         _ => acc,
     })
+}
+
+fn patch_inline_hints(serde_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let code = fs::read_to_string(serde_path)?;
+    let mut lines: Vec<String> = code.lines().map(|s| s.to_string()).collect();
+
+    let hot_types = ["BidRequest", "bid_request::Imp", "bid_request::Device", "bid_request::User"];
+
+    let mut in_hot_impl = false;
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i].clone();
+
+        if line.trim().starts_with("impl<'de> serde::Deserialize<'de> for ") {
+            in_hot_impl = hot_types.iter().any(|t| line.contains(t));
+        }
+
+        if in_hot_impl && line.trim().starts_with("fn deserialize<D>(") {
+            if i > 0 && !lines[i-1].trim().starts_with("#[inline]") {
+                lines.insert(i, "    #[inline]".to_string());
+                i += 1;
+            }
+            in_hot_impl = false;
+        }
+
+        if line.trim().starts_with("fn visit_map<") {
+            if i > 0 && !lines[i-1].trim().starts_with("#[inline]") {
+                lines.insert(i, "            #[inline]".to_string());
+                i += 1;
+            }
+        }
+
+        i += 1;
+    }
+
+    let mut output = lines.join("\n");
+    output.push('\n');
+    fs::write(serde_path, output)?;
+
+    Ok(())
 }
 
 /// Patches generated proto code to wrap extension fields with ExtWithCustom.

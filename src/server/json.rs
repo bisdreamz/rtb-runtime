@@ -4,12 +4,14 @@ use actix_web::body::BoxBody;
 #[cfg(feature = "simd-json")]
 use actix_web::dev::Payload;
 #[cfg(feature = "simd-json")]
-use actix_web::web::Bytes;
+use actix_web::web::BytesMut;
 #[cfg(feature = "simd-json")]
 use actix_web::{FromRequest, ResponseError};
 use actix_web::{HttpRequest, HttpResponse, Responder};
 #[cfg(feature = "simd-json")]
 use futures_util::future::LocalBoxFuture;
+#[cfg(feature = "simd-json")]
+use futures_util::StreamExt;
 use std::fmt;
 use std::ops::Deref;
 
@@ -37,6 +39,9 @@ pub enum FastJsonError {
     Overflow,
     #[cfg(feature = "simd-json")]
     Parse(simd_json::Error),
+    #[cfg(feature = "simd-json")]
+    Payload(actix_web::error::PayloadError),
+    #[cfg(not(feature = "simd-json"))]
     Payload(actix_web::Error),
 }
 
@@ -72,18 +77,23 @@ where
     type Error = FastJsonError;
     type Future = LocalBoxFuture<'static, Result<Self, Self::Error>>;
 
-    fn from_request(req: &HttpRequest, payload: &mut Payload) -> Self::Future {
-        let fut = Bytes::from_request(req, payload);
+    fn from_request(_req: &HttpRequest, payload: &mut Payload) -> Self::Future {
+        let mut payload = payload.take();
 
         Box::pin(async move {
-            let bytes = fut.await.map_err(FastJsonError::Payload)?;
+            let mut body = BytesMut::new();
 
-            if bytes.len() > MAX_SIZE {
-                return Err(FastJsonError::Overflow);
+            while let Some(chunk) = payload.next().await {
+                let chunk = chunk.map_err(FastJsonError::Payload)?;
+
+                if (body.len() + chunk.len()) > MAX_SIZE {
+                    return Err(FastJsonError::Overflow);
+                }
+
+                body.extend_from_slice(&chunk);
             }
 
-            let mut json_buf = bytes.to_vec();
-            let value = simd_json::from_slice(&mut json_buf).map_err(FastJsonError::Parse)?;
+            let value = simd_json::from_slice(body.as_mut()).map_err(FastJsonError::Parse)?;
             Ok(FastJson(value))
         })
     }

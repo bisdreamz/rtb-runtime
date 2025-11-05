@@ -70,6 +70,13 @@ async fn bid_proto(Protobuf(request): Protobuf<BidRequest>) -> HttpResponse {
     HttpResponse::Ok().finish()
 }
 
+// For high-performance JSON with simd-json (enable the "simd-json" feature):
+#[cfg(feature = "simd-json")]
+async fn bid_json_fast(request: rtb::server::json::FastJson<BidRequest>) -> HttpResponse {
+    println!("Fast JSON request {}", request.id);
+    HttpResponse::Ok().finish()
+}
+
 fn routes(cfg: &mut ServiceConfig) {
     cfg.route("/bid/json", web::post().to(bid_json))
         .route("/bid/proto", web::post().to(bid_proto));
@@ -97,6 +104,12 @@ async fn main() -> anyhow::Result<()> {
 ```
 
 TLS (self-signed or provided certificates), h2/h2c support, request limits, and worker tuning are all part of the `ServerConfig`. See `examples/server_usage.rs` for a complete setup.
+
+## Features
+
+- **`actix-web`** (default): Enables the HTTP server and payload extractors (`Json`, `Protobuf`)
+- **`simd-json`**: Enables the high-performance `FastJson` extractor that uses zero-copy deserialization with SIMD-accelerated parsing (10-20% faster than standard JSON)
+- **`tracing`**: Enables observability helpers for distributed tracing
 
 ## Code Generation
 
