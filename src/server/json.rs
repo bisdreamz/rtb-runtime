@@ -9,9 +9,9 @@ use actix_web::web::BytesMut;
 use actix_web::{FromRequest, ResponseError};
 use actix_web::{HttpRequest, HttpResponse, Responder};
 #[cfg(feature = "simd-json")]
-use futures_util::future::LocalBoxFuture;
-#[cfg(feature = "simd-json")]
 use futures_util::StreamExt;
+#[cfg(feature = "simd-json")]
+use futures_util::future::LocalBoxFuture;
 use std::fmt;
 use std::ops::Deref;
 
@@ -54,11 +54,7 @@ pub(crate) fn extract_gzip_isize(compressed: &[u8]) -> Result<usize, FastJsonErr
 
     // If ISIZE is 0, it means the size is a multiple of 2^32 or unknown
     // Use a reasonable default
-    if isize == 0 {
-        Ok(MAX_SIZE)
-    } else {
-        Ok(isize)
-    }
+    if isize == 0 { Ok(MAX_SIZE) } else { Ok(isize) }
 }
 
 #[cfg(feature = "simd-json")]
@@ -71,9 +67,7 @@ pub(crate) fn decompress_gzip(compressed: BytesMut) -> Result<BytesMut, FastJson
 
         let actual_size = decompressor
             .gzip_decompress(&compressed, &mut decompressed)
-            .map_err(|e| {
-                FastJsonError::Decompression(format!("libdeflater error: {:?}", e))
-            })?;
+            .map_err(|e| FastJsonError::Decompression(format!("libdeflater error: {:?}", e)))?;
 
         decompressed.truncate(actual_size);
         Ok(decompressed)
