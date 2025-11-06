@@ -8,7 +8,7 @@ name = "rtb"
 
 [features]
 default = ["actix-web"]
-actix-web = ["dep:actix-web", "dep:rustls", "dep:rcgen", "dep:rustls-pemfile", "dep:futures-util"]
+actix-web = ["dep:actix-web", "dep:rustls", "dep:rcgen", "dep:rustls-pemfile", "dep:futures-util", "dep:libdeflater"]
 tracing = ["dep:tracing"]
 simd-json = ["dep:simd-json"]
 
@@ -30,6 +30,7 @@ rustls-pemfile = { version = "2.2.0", optional = true }
 futures-util = { version = "0.3.31", optional = true }
 tracing = { version = "0.1.41", optional = true }
 simd-json = { version = "0.13", optional = true }
+libdeflater = { version = "1.23", optional = true }
 memchr = "2.7.6"
 strum = { version = "0.27.2", features = ["derive"] }
 quick-xml = "0.38.3"
