@@ -1,4 +1,5 @@
 use anyhow::{Error, Result, anyhow, bail};
+use serde::{Deserialize, Serialize};
 use url::Url;
 
 /// A URL builder that supports typed key-value pairs with finalization semantics.
@@ -19,7 +20,7 @@ use url::Url;
 /// # Ok(())
 /// # }
 /// ```
-#[derive(Clone, Debug)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 pub struct DataUrl {
     domain: String,
     path: String,
