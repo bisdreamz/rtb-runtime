@@ -1,3 +1,4 @@
+use anyhow::{bail, Error};
 use crate::bid_response::Bid;
 use crate::bid_response::bid::AdmOneof;
 use serde::{Deserialize, Serialize};
@@ -12,7 +13,24 @@ pub enum AdFormat {
     Native,
 }
 
-fn is_vast(adm: &str) -> bool {
+/// Convenience method for extracting textual adm from a bid response.
+/// The only time this fails is if the adm is empty, or if the
+/// bid response is a native bid via protobuf, in which case
+/// the adm_oneof must be extracted manually
+pub fn get_adm(bid: &Bid) -> Result<&str, Error> {
+    if bid.adm_oneof.is_none() {
+        bail!("No adm present on bid");
+    }
+
+    match bid.adm_oneof.as_ref().unwrap() {
+        AdmOneof::Adm(s) => {
+            Ok(s)
+        },
+        _ => bail!("NativeResponse object detected (protobuf?) must handle manually")
+    }
+}
+
+pub fn is_vast(adm: &str) -> bool {
     use memchr::memchr;
 
     let mut s = adm;
@@ -39,7 +57,7 @@ fn is_vast(adm: &str) -> bool {
     false
 }
 
-fn classify_adm(adm: &AdmOneof) -> Option<AdFormat> {
+pub fn classify_adm(adm: &AdmOneof) -> Option<AdFormat> {
     match adm {
         AdmOneof::Adm(s) => {
             let trim_adm = s.trim_start_matches('\u{feff}').trim_start();
@@ -58,6 +76,24 @@ fn classify_adm(adm: &AdmOneof) -> Option<AdFormat> {
         }
         AdmOneof::AdmNative(_) => Some(AdFormat::Native),
     }
+}
+
+/// Convenience method to apply a processing function to textual bid adm.
+/// Examples include replacing macros, custom appenders, etc.
+/// Fails if the adm is empty or if the bid response is a ['NativeResponse']
+/// received via a protobuf demand integration, in which case you must
+/// handle adm_oneof directly.
+
+pub fn process_replace_adm<F>(bid: &mut Bid, proc: F) -> Result<(), Error>
+where
+    F: FnOnce(&str, &Bid) -> String
+{
+    let adm = get_adm(&*bid)?;
+    let new_adm = proc(&adm, &*bid);
+
+    bid.adm_oneof = Some(AdmOneof::Adm(new_adm));
+
+    Ok(())
 }
 
 /// Detect the type of ['AdFormat'] the bid markup is
