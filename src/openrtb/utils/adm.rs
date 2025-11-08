@@ -1,6 +1,6 @@
-use anyhow::{bail, Error};
 use crate::bid_response::Bid;
 use crate::bid_response::bid::AdmOneof;
+use anyhow::{Error, bail};
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumString};
 
@@ -23,10 +23,8 @@ pub fn get_adm(bid: &Bid) -> Result<&str, Error> {
     }
 
     match bid.adm_oneof.as_ref().unwrap() {
-        AdmOneof::Adm(s) => {
-            Ok(s)
-        },
-        _ => bail!("NativeResponse object detected (protobuf?) must handle manually")
+        AdmOneof::Adm(s) => Ok(s),
+        _ => bail!("NativeResponse object detected (protobuf?) must handle manually"),
     }
 }
 
@@ -86,7 +84,7 @@ pub fn classify_adm(adm: &AdmOneof) -> Option<AdFormat> {
 
 pub fn process_replace_adm<F>(bid: &mut Bid, proc: F) -> Result<(), Error>
 where
-    F: FnOnce(&str, &Bid) -> String
+    F: FnOnce(&str, &Bid) -> String,
 {
     let adm = get_adm(&*bid)?;
     let new_adm = proc(&adm, &*bid);
