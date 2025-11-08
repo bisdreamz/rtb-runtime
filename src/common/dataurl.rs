@@ -54,6 +54,16 @@ impl DataUrl {
         })
     }
 
+    /// Clones this DataUrl and returns it in an unfinalized state
+    /// for further parameter additions
+    pub fn clone_unfinalized(&self) -> Self {
+        let mut clone = self.clone();
+
+        clone.finalized = false;
+
+        clone
+    }
+
     /// Parses an existing URL string into a finalized DataUrl.
     ///
     /// This is useful for parsing beacon URLs that have already been constructed.
