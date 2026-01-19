@@ -2,6 +2,7 @@ use actix_web::dev::ServerHandle;
 use actix_web::middleware::Compress;
 use actix_web::{App, HttpServer, rt, web};
 use rcgen::generate_simple_self_signed;
+use rustls::crypto::aws_lc_rs;
 use rustls::pki_types::CertificateDer;
 use rustls_pemfile::{certs, private_key};
 use serde::{Deserialize, Serialize};
@@ -73,7 +74,9 @@ impl Server {
                         std::io::Error::new(std::io::ErrorKind::InvalidInput, "no key")
                     })?;
 
-                Ok(rustls::ServerConfig::builder()
+                Ok(rustls::ServerConfig::builder_with_provider(aws_lc_rs::default_provider().into())
+                    .with_safe_default_protocol_versions()
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?
                     .with_no_client_auth()
                     .with_single_cert(cert_chain, key)
                     .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?)
@@ -100,7 +103,9 @@ impl Server {
                         std::io::Error::new(std::io::ErrorKind::InvalidInput, "no key")
                     })?;
 
-                Ok(rustls::ServerConfig::builder()
+                Ok(rustls::ServerConfig::builder_with_provider(aws_lc_rs::default_provider().into())
+                    .with_safe_default_protocol_versions()
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?
                     .with_no_client_auth()
                     .with_single_cert(cert_chain, key)
                     .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?)

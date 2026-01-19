@@ -23,9 +23,9 @@ pbjson-types = "0.8"  # Provides serde for google.protobuf.Value
 derive_builder = "0.20"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-actix-web = { version = "4.11.0", features = ["rustls-0_23"], optional = true }
-rustls = { version = "0.23.32", default-features = false, features = ["ring"], optional = true }
-rcgen = { version = "0.14.5", optional = true }
+actix-web = { version = "4.11.0", default-features = false, features = ["macros", "compress-gzip", "compress-zstd", "cookies", "rustls-0_23"], optional = true }
+rustls = { version = "0.23", optional = true }
+rcgen = { version = "0.14", default-features = false, features = ["aws_lc_rs", "pem"], optional = true }
 rustls-pemfile = { version = "2.2.0", optional = true }
 futures-util = { version = "0.3.31", optional = true }
 tracing = { version = "0.1.41", optional = true }
@@ -35,7 +35,7 @@ memchr = "2.7.6"
 strum = { version = "0.27.2", features = ["derive"] }
 quick-xml = "0.38.3"
 anyhow = "1.0.100"
-url = "2.5.7"
+url = { version = "2.5", features = ["serde"] }
 
 [dev-dependencies]
 actix-rt = "2.11.0"
