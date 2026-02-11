@@ -91,7 +91,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 
 // Prost imports for protobuf support
 use prost::bytes::{Buf, BufMut};
@@ -479,6 +479,12 @@ impl<T> Deref for ExtWithCustom<T> {
 
     fn deref(&self) -> &T {
         &self.proto
+    }
+}
+
+impl<T> DerefMut for ExtWithCustom<T> {
+    fn deref_mut(&mut self) -> &mut T {
+        &mut self.proto
     }
 }
 

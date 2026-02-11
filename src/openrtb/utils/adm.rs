@@ -4,13 +4,24 @@ use anyhow::{Error, bail};
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumString};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, EnumString, Display)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, EnumString, Display)]
 #[strum(ascii_case_insensitive)]
 pub enum AdFormat {
     Banner,
     Video,
     Audio,
     Native,
+}
+
+impl AdFormat {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            AdFormat::Banner => "banner",
+            AdFormat::Video => "video",
+            AdFormat::Audio => "audio",
+            AdFormat::Native => "native",
+        }
+    }
 }
 
 /// Convenience method for extracting textual adm from a bid response.

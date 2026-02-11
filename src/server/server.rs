@@ -74,12 +74,14 @@ impl Server {
                         std::io::Error::new(std::io::ErrorKind::InvalidInput, "no key")
                     })?;
 
-                Ok(rustls::ServerConfig::builder_with_provider(aws_lc_rs::default_provider().into())
-                    .with_safe_default_protocol_versions()
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?
-                    .with_no_client_auth()
-                    .with_single_cert(cert_chain, key)
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?)
+                Ok(rustls::ServerConfig::builder_with_provider(
+                    aws_lc_rs::default_provider().into(),
+                )
+                .with_safe_default_protocol_versions()
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?
+                .with_no_client_auth()
+                .with_single_cert(cert_chain, key)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?)
             }
             TlsConfig::SelfSigned { hosts } => {
                 let cert = generate_simple_self_signed(hosts)
@@ -103,12 +105,14 @@ impl Server {
                         std::io::Error::new(std::io::ErrorKind::InvalidInput, "no key")
                     })?;
 
-                Ok(rustls::ServerConfig::builder_with_provider(aws_lc_rs::default_provider().into())
-                    .with_safe_default_protocol_versions()
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?
-                    .with_no_client_auth()
-                    .with_single_cert(cert_chain, key)
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?)
+                Ok(rustls::ServerConfig::builder_with_provider(
+                    aws_lc_rs::default_provider().into(),
+                )
+                .with_safe_default_protocol_versions()
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?
+                .with_no_client_auth()
+                .with_single_cert(cert_chain, key)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?)
             }
         }
     }
