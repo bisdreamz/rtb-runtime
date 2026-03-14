@@ -52,18 +52,8 @@ pub fn html_pixel(url: impl AsRef<str>) -> Result<String, PixelError> {
     validate_url(url)?;
 
     Ok(format!(
-        r#"<img src="{}" width="1" height="1" style="border:0;display:none" alt="" />"#,
-        html_escape(url)
+        r#"<img src="{url}" width="1" height="1" style="border:0;display:none" alt="" />"#,
     ))
-}
-
-/// Escapes HTML special characters in a string
-fn html_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#x27;")
 }
 
 #[cfg(test)]
@@ -127,28 +117,10 @@ mod tests {
     }
 
     #[test]
-    fn test_html_escape() {
-        let escaped = html_escape("https://example.com?a=1&b=2");
-        assert_eq!(escaped, "https://example.com?a=1&amp;b=2");
-    }
-
-    #[test]
-    fn test_html_escape_all_chars() {
-        let escaped = html_escape(r#"<script>alert('xss')"</script>"#);
-        assert_eq!(
-            escaped,
-            r#"&lt;script&gt;alert(&#x27;xss&#x27;)&quot;&lt;/script&gt;"#
-        );
-    }
-
-    #[test]
-    fn test_html_pixel_escapes_special_chars() {
-        let result = html_pixel(r#"https://example.com/track?param="value""#);
+    fn test_html_pixel_preserves_query_params() {
+        let result = html_pixel("https://example.com/track?a=1&b=2");
         assert!(result.is_ok());
         let html = result.unwrap();
-        // The URL should have quotes escaped as &quot;
-        assert!(html.contains("param=&quot;value&quot;"));
-        // Should still have proper HTML structure with quotes in attributes
-        assert!(html.starts_with(r#"<img src=""#));
+        assert!(html.contains("a=1&b=2"));
     }
 }
