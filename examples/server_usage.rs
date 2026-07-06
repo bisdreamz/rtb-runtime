@@ -47,6 +47,7 @@ async fn main() {
         max_conns: None,
         threads: None,
         tls_rate_per_worker: Some(512),
+        keep_alive_secs: None,
     };
 
     let service = |cfg: &mut ServiceConfig| {

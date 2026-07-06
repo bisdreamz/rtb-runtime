@@ -44,6 +44,7 @@ async fn test_http_server() {
         max_conns: None,
         threads: Some(2),
         tls_rate_per_worker: None,
+        keep_alive_secs: None,
     };
 
     let server = Server::listen(cfg, configure_services)
@@ -78,6 +79,7 @@ async fn test_https_server() {
         max_conns: None,
         threads: Some(2),
         tls_rate_per_worker: Some(256),
+        keep_alive_secs: None,
     };
 
     let server = Server::listen(cfg, configure_services)
@@ -112,6 +114,7 @@ async fn test_both_http_and_https() {
         max_conns: None,
         threads: Some(2),
         tls_rate_per_worker: Some(256),
+        keep_alive_secs: None,
     };
 
     let server = Server::listen(cfg, configure_services)
@@ -158,6 +161,7 @@ async fn test_gzip_compression() {
         max_conns: None,
         threads: Some(2),
         tls_rate_per_worker: None,
+        keep_alive_secs: None,
     };
 
     let server = Server::listen(cfg, configure_services)
@@ -209,6 +213,7 @@ async fn test_provided_certs_from_file() {
         max_conns: None,
         threads: Some(2),
         tls_rate_per_worker: Some(256),
+        keep_alive_secs: None,
     };
 
     let server = Server::listen(cfg, configure_services)
@@ -244,6 +249,7 @@ async fn test_invalid_protobuf() {
         max_conns: None,
         threads: Some(2),
         tls_rate_per_worker: None,
+        keep_alive_secs: None,
     };
 
     let server = Server::listen(cfg, configure_services)
@@ -303,6 +309,7 @@ async fn test_protobuf_responder() {
         max_conns: None,
         threads: Some(2),
         tls_rate_per_worker: None,
+        keep_alive_secs: None,
     };
 
     let server = Server::listen(cfg, configure_responder_services)
@@ -348,6 +355,7 @@ async fn test_protobuf_responder_with_gzip() {
         max_conns: None,
         threads: Some(2),
         tls_rate_per_worker: None,
+        keep_alive_secs: None,
     };
 
     let server = Server::listen(cfg, configure_responder_services)
@@ -423,6 +431,7 @@ async fn test_bid_response_state_with_bid() {
         max_conns: None,
         threads: Some(2),
         tls_rate_per_worker: None,
+        keep_alive_secs: None,
     };
 
     let server = Server::listen(cfg, configure_state_services)
@@ -469,6 +478,7 @@ async fn test_bid_response_state_with_nobid() {
         max_conns: None,
         threads: Some(2),
         tls_rate_per_worker: None,
+        keep_alive_secs: None,
     };
 
     let server = Server::listen(cfg, configure_state_services)
