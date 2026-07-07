@@ -44,6 +44,11 @@ pub struct ServerConfig {
     /// Example default is 512, so on a 16 cpu server 512*16=8096 allowed tls conns
     /// being established at the same time.
     pub tls_rate_per_worker: Option<usize>,
+    /// HTTP keep-alive idle timeout in seconds for client connections.
+    /// None = actix default (5s). Must exceed any upstream proxy's idle
+    /// connection-reuse window (e.g. Cloudflare pools origin connections
+    /// for ~90s) or the proxy re-uses connections the server already closed.
+    pub keep_alive_secs: Option<u64>,
 }
 
 /// Instance of an HTTP(S) server
@@ -149,6 +154,10 @@ impl Server {
         .client_request_timeout(Duration::from_secs(1))
         .max_connection_rate(cfg.tls_rate_per_worker.unwrap_or(256))
         .disable_signals();
+
+        if let Some(secs) = cfg.keep_alive_secs {
+            app = app.keep_alive(Duration::from_secs(secs));
+        }
 
         if let Some(http_port) = cfg.http_port {
             app = app.bind_auto_h2c((LISTEN_ADDR, http_port))?;
