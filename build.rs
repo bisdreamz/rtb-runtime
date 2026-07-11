@@ -31,6 +31,7 @@ fn patch_proto(src: &str) -> String {
     let mut inserted_syntax = false;
     let mut inserted_import = false;
     let mut in_header = true;
+    let mut privacy_presence_hits = 0usize;
 
     for line in src.lines() {
         let trimmed = line.trim();
@@ -70,6 +71,24 @@ fn patch_proto(src: &str) -> String {
             line.to_string()
         };
 
+        // Editions 2023 scalar fields have explicit presence by default. The
+        // proto3 compatibility conversion above would otherwise collapse an
+        // explicit privacy signal value of 0 into the same Rust value as an
+        // omitted/unknown field. Restore presence only for the OpenRTB privacy
+        // flags whose specifications assign meaning to omission.
+        let line_to_write = if matches!(
+            trimmed,
+            "bool dnt = 1;"
+                | "bool lmt = 23;"
+                | "bool gdpr = 4;"
+                | "bool gdpr = 1 [deprecated = true];"
+        ) {
+            privacy_presence_hits += 1;
+            line_to_write.replacen("bool ", "optional bool ", 1)
+        } else {
+            line_to_write
+        };
+
         // Insert syntax = "proto3" at the very top (after comments)
         if !inserted_syntax && !trimmed.is_empty() && !trimmed.starts_with("//") {
             out.push_str("syntax = \"proto3\";\n");
@@ -100,6 +119,11 @@ fn patch_proto(src: &str) -> String {
     if !has_import && !inserted_import {
         out.push_str("\nimport \"google/protobuf/struct.proto\";\n");
     }
+
+    assert_eq!(
+        privacy_presence_hits, 4,
+        "expected to restore presence for device.dnt, device.lmt, regs.gdpr, and regs.ext.gdpr"
+    );
 
     out
 }
@@ -185,10 +209,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .ignore_unknown_fields()
         .build(&[".com.iabtechlab.openrtb.v2"])?;
 
-    let bool_fields = collect_bool_field_names(&descriptor_set)?;
+    let bool_fields = collect_bool_fields(&descriptor_set)?;
     let ext_fields = collect_ext_field_info(&descriptor_set)?;
     let serde_path = out_dir.join("com.iabtechlab.openrtb.v2.serde.rs");
-    patch_pbjson_bool_handling(&serde_path, &bool_fields)?;
+    patch_pbjson_bool_handling(&serde_path, &bool_fields.all, &bool_fields.optional)?;
     patch_inline_hints(&serde_path)?;
 
     let proto_path = out_dir.join("com.iabtechlab.openrtb.v2.rs");
@@ -197,11 +221,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn collect_bool_field_names(
-    descriptor_bytes: &[u8],
-) -> Result<BTreeMap<String, BTreeSet<String>>, Box<dyn std::error::Error>> {
+#[derive(Default)]
+struct BoolFields {
+    all: BTreeMap<String, BTreeSet<String>>,
+    optional: BTreeMap<String, BTreeSet<String>>,
+}
+
+fn collect_bool_fields(descriptor_bytes: &[u8]) -> Result<BoolFields, Box<dyn std::error::Error>> {
     let descriptor_set = FileDescriptorSet::decode(descriptor_bytes)?;
-    let mut fields: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let mut fields = BoolFields::default();
 
     for file in descriptor_set.file {
         if file.package.as_deref() != Some("com.iabtechlab.openrtb.v2") {
@@ -219,7 +247,7 @@ fn collect_bool_field_names(
 fn collect_from_message(
     message: &DescriptorProto,
     path: &mut Vec<String>,
-    fields: &mut BTreeMap<String, BTreeSet<String>>,
+    fields: &mut BoolFields,
 ) {
     let name = match &message.name {
         Some(name) => name.clone(),
@@ -233,9 +261,17 @@ fn collect_from_message(
             if let Some(field_name) = &field.name {
                 let type_path = rust_type_path(path);
                 fields
-                    .entry(type_path)
+                    .all
+                    .entry(type_path.clone())
                     .or_default()
                     .insert(field_name.clone());
+                if field.proto3_optional == Some(true) {
+                    fields
+                        .optional
+                        .entry(type_path)
+                        .or_default()
+                        .insert(field_name.clone());
+                }
             }
         }
     }
@@ -277,6 +313,7 @@ fn rust_type_path(path: &[String]) -> String {
 fn patch_pbjson_bool_handling(
     serde_path: &Path,
     bool_fields: &BTreeMap<String, BTreeSet<String>>,
+    optional_bool_fields: &BTreeMap<String, BTreeSet<String>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let code = fs::read_to_string(serde_path)
         .map_err(|e| format!("failed to read generated serde file: {e}"))?;
@@ -284,6 +321,8 @@ fn patch_pbjson_bool_handling(
     let mut lines: Vec<String> = code.lines().map(|s| s.to_string()).collect();
     let mut serialize_hits = 0usize;
     let mut deserialize_hits = 0usize;
+    let mut optional_serialize_hits = 0usize;
+    let mut optional_deserialize_hits = 0usize;
 
     let mut i = 0usize;
     while i < lines.len() {
@@ -291,11 +330,25 @@ fn patch_pbjson_bool_handling(
             let fields = bool_fields
                 .get(&type_name)
                 .map(|set| set.iter().cloned().collect::<Vec<_>>());
+            let optional_fields = optional_bool_fields.get(&type_name);
             let mut depth = brace_delta(&lines[i]);
             let mut j = i + 1;
             while depth > 0 && j < lines.len() {
                 if let Some(fields) = &fields {
                     for field in fields {
+                        if optional_fields.is_some_and(|fields| fields.contains(field)) {
+                            let needle = format!("struct_ser.serialize_field(\"{field}\", v)?;");
+                            if lines[j].contains(&needle) {
+                                let replacement = format!(
+                                    "struct_ser.serialize_field(\"{field}\", &crate::compat::bool_as_int::Ser(v))?;"
+                                );
+                                lines[j] = lines[j].replace(&needle, &replacement);
+                                serialize_hits += 1;
+                                optional_serialize_hits += 1;
+                            }
+                            continue;
+                        }
+
                         let needle =
                             format!("struct_ser.serialize_field(\"{field}\", &self.{field})?;");
                         if lines[j].contains(&needle) {
@@ -320,11 +373,25 @@ fn patch_pbjson_bool_handling(
             let fields = bool_fields
                 .get(&type_name)
                 .map(|set| set.iter().cloned().collect::<Vec<_>>());
+            let optional_fields = optional_bool_fields.get(&type_name);
             let mut depth = brace_delta(&lines[i]);
             let mut j = i + 1;
             while depth > 0 && j < lines.len() {
                 if let Some(fields) = &fields {
                     for field in fields {
+                        if optional_fields.is_some_and(|fields| fields.contains(field)) {
+                            let direct_pattern = format!("{field}__ = map_.next_value()?;");
+                            if lines[j].contains(&direct_pattern) {
+                                let replacement = format!(
+                                    "{field}__ = map_.next_value::<Option<crate::compat::bool_as_int::De>>()?.map(|value| value.0);"
+                                );
+                                lines[j] = lines[j].replace(&direct_pattern, &replacement);
+                                deserialize_hits += 1;
+                                optional_deserialize_hits += 1;
+                            }
+                            continue;
+                        }
+
                         let pattern = format!("{field}__ = Some(map_.next_value()?);");
                         if lines[j].contains(&pattern) {
                             let replacement = format!(
@@ -357,6 +424,19 @@ fn patch_pbjson_bool_handling(
     if serialize_hits == 0 || deserialize_hits == 0 {
         return Err(format!(
             "failed to patch pbjson output for bool fields (serialize_hits={serialize_hits}, deserialize_hits={deserialize_hits})"
+        )
+        .into());
+    }
+
+    let expected_optional_hits = optional_bool_fields
+        .values()
+        .map(BTreeSet::len)
+        .sum::<usize>();
+    if optional_serialize_hits != expected_optional_hits
+        || optional_deserialize_hits != expected_optional_hits
+    {
+        return Err(format!(
+            "failed to patch optional bool fields (expected={expected_optional_hits}, serialize_hits={optional_serialize_hits}, deserialize_hits={optional_deserialize_hits})"
         )
         .into());
     }
