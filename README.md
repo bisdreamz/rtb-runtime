@@ -50,6 +50,21 @@ if let Some(imp) = request.imp.first() {
 }
 ```
 
+Privacy flags whose specifications distinguish omission from an explicit `0` preserve
+that distinction as `Option<bool>`:
+
+```rust
+match request.regs.as_ref().and_then(|regs| regs.gdpr) {
+    Some(true) => println!("GDPR applies"),
+    Some(false) => println!("GDPR does not apply"),
+    None => println!("GDPR applicability is unknown"),
+}
+```
+
+This applies to `regs.gdpr`, deprecated `regs.ext.gdpr`, `device.dnt`, and
+`device.lmt`. JSON continues to use OpenRTB integer flags (`0`/`1`), and presence
+is also retained through protobuf round-trips.
+
 ## HTTP Server
 
 `rtb::server` exposes a high-level server that already wires up Actix Web, payload extractors, TLS, and HTTP/2 options. Provide a `ServerConfig`, register your handlers, and it will listen for both JSON and protobuf bid requests on the endpoints you define:
