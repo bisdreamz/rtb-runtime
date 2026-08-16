@@ -153,6 +153,7 @@ impl Server {
         )
         .client_request_timeout(Duration::from_secs(1))
         .max_connection_rate(cfg.tls_rate_per_worker.unwrap_or(512))
+        .tcp_nodelay(true)
         .disable_signals();
 
         if let Some(secs) = cfg.keep_alive_secs {
