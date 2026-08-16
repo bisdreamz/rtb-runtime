@@ -152,7 +152,7 @@ impl Server {
                 .unwrap_or(std::thread::available_parallelism()?.get()),
         )
         .client_request_timeout(Duration::from_secs(1))
-        .max_connection_rate(cfg.tls_rate_per_worker.unwrap_or(256))
+        .max_connection_rate(cfg.tls_rate_per_worker.unwrap_or(512))
         .disable_signals();
 
         if let Some(secs) = cfg.keep_alive_secs {
