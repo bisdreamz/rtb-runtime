@@ -74,11 +74,30 @@ pub(crate) fn decompress_gzip(compressed: BytesMut) -> Result<BytesMut, FastJson
     })
 }
 
-pub struct FastJson<T>(pub T);
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Body metadata captured by [`FastJson`] without copying the request body.
+pub struct BodyStats {
+    /// Bytes received before optional gzip decompression.
+    pub encoded_bytes: usize,
+    /// Bytes passed to the JSON parser after optional decompression.
+    pub decoded_bytes: usize,
+    /// Whether gzip decompression was applied.
+    pub gzip: bool,
+}
+
+pub struct FastJson<T> {
+    value: T,
+    body_stats: BodyStats,
+}
 
 impl<T> FastJson<T> {
     pub fn into_inner(self) -> T {
-        self.0
+        self.value
+    }
+
+    /// Returns the parsed value and its request-body metadata.
+    pub fn into_parts(self) -> (T, BodyStats) {
+        (self.value, self.body_stats)
     }
 }
 
@@ -86,7 +105,7 @@ impl<T> Deref for FastJson<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.value
     }
 }
 
@@ -162,15 +181,25 @@ where
                 body.extend_from_slice(&chunk);
             }
 
+            let encoded_bytes = body.len();
+
             // Decompress if needed
             let mut final_body = if is_gzip {
                 decompress_gzip(body)?
             } else {
                 body
             };
+            let decoded_bytes = final_body.len();
 
             let value = simd_json::from_slice(final_body.as_mut()).map_err(FastJsonError::Parse)?;
-            Ok(FastJson(value))
+            Ok(FastJson {
+                value,
+                body_stats: BodyStats {
+                    encoded_bytes,
+                    decoded_bytes,
+                    gzip: is_gzip,
+                },
+            })
         })
     }
 }
@@ -203,7 +232,21 @@ impl Responder for JsonBidResponseState {
 #[cfg(all(test, feature = "simd-json"))]
 mod tests {
     use super::*;
+    use actix_web::FromRequest;
+    use actix_web::test::TestRequest;
     use std::io::Write;
+
+    async fn extract_json(body: Vec<u8>, gzip: bool) -> FastJson<serde_json::Value> {
+        let mut request = TestRequest::post();
+        if gzip {
+            request = request.insert_header(("content-encoding", "gzip"));
+        }
+        let (request, mut payload) = request.set_payload(body).to_http_parts();
+
+        FastJson::from_request(&request, &mut payload)
+            .await
+            .unwrap()
+    }
 
     #[test]
     fn test_extract_gzip_isize() {
@@ -260,5 +303,33 @@ mod tests {
 
         assert_eq!(&decompressed[..], json_data);
         assert!(serde_json::from_slice::<serde_json::Value>(&decompressed).is_ok());
+    }
+
+    #[actix_web::test]
+    async fn fast_json_reports_plain_body_stats() {
+        let body = br#"{"id":"request-1"}"#.to_vec();
+        let body_len = body.len();
+        let (value, stats) = extract_json(body, false).await.into_parts();
+
+        assert_eq!(value["id"], "request-1");
+        assert_eq!(stats.encoded_bytes, body_len);
+        assert_eq!(stats.decoded_bytes, body_len);
+        assert!(!stats.gzip);
+    }
+
+    #[actix_web::test]
+    async fn fast_json_reports_gzip_body_stats() {
+        let body = br#"{"id":"request-1","imp":[{"id":"1"}]}"#;
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(body).unwrap();
+        let compressed = encoder.finish().unwrap();
+        let compressed_len = compressed.len();
+
+        let (value, stats) = extract_json(compressed, true).await.into_parts();
+
+        assert_eq!(value["id"], "request-1");
+        assert_eq!(stats.encoded_bytes, compressed_len);
+        assert_eq!(stats.decoded_bytes, body.len());
+        assert!(stats.gzip);
     }
 }
