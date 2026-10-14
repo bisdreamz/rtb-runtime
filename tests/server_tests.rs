@@ -22,6 +22,7 @@ fn configure_services(cfg: &mut ServiceConfig) {
 fn test_client() -> reqwest::Client {
     reqwest::Client::builder()
         .danger_accept_invalid_certs(true)
+        .http1_only()
         .build()
         .unwrap()
 }
@@ -45,6 +46,7 @@ async fn test_http_server() {
         threads: Some(2),
         tls_rate_per_worker: None,
         keep_alive_secs: None,
+        gzip_min_bytes: None,
     };
 
     let server = Server::listen(cfg, configure_services)
@@ -80,6 +82,7 @@ async fn test_https_server() {
         threads: Some(2),
         tls_rate_per_worker: Some(256),
         keep_alive_secs: None,
+        gzip_min_bytes: None,
     };
 
     let server = Server::listen(cfg, configure_services)
@@ -115,6 +118,7 @@ async fn test_both_http_and_https() {
         threads: Some(2),
         tls_rate_per_worker: Some(256),
         keep_alive_secs: None,
+        gzip_min_bytes: None,
     };
 
     let server = Server::listen(cfg, configure_services)
@@ -162,6 +166,7 @@ async fn test_gzip_compression() {
         threads: Some(2),
         tls_rate_per_worker: None,
         keep_alive_secs: None,
+        gzip_min_bytes: None,
     };
 
     let server = Server::listen(cfg, configure_services)
@@ -214,6 +219,7 @@ async fn test_provided_certs_from_file() {
         threads: Some(2),
         tls_rate_per_worker: Some(256),
         keep_alive_secs: None,
+        gzip_min_bytes: None,
     };
 
     let server = Server::listen(cfg, configure_services)
@@ -250,6 +256,7 @@ async fn test_invalid_protobuf() {
         threads: Some(2),
         tls_rate_per_worker: None,
         keep_alive_secs: None,
+        gzip_min_bytes: None,
     };
 
     let server = Server::listen(cfg, configure_services)
@@ -310,6 +317,7 @@ async fn test_protobuf_responder() {
         threads: Some(2),
         tls_rate_per_worker: None,
         keep_alive_secs: None,
+        gzip_min_bytes: None,
     };
 
     let server = Server::listen(cfg, configure_responder_services)
@@ -356,6 +364,7 @@ async fn test_protobuf_responder_with_gzip() {
         threads: Some(2),
         tls_rate_per_worker: None,
         keep_alive_secs: None,
+        gzip_min_bytes: None,
     };
 
     let server = Server::listen(cfg, configure_responder_services)
@@ -375,7 +384,8 @@ async fn test_protobuf_responder_with_gzip() {
 
     assert_eq!(response.status(), 200);
 
-    // Actix Compress middleware should handle gzip if response is large enough
+    // This protobuf response is below the gzip threshold, so it is sent plain;
+    // test_gzip_on_the_wire covers compression.
     let body_bytes = response.bytes().await.unwrap();
     let bid_response = BidResponse::decode(body_bytes.as_ref()).unwrap();
 
@@ -432,6 +442,7 @@ async fn test_bid_response_state_with_bid() {
         threads: Some(2),
         tls_rate_per_worker: None,
         keep_alive_secs: None,
+        gzip_min_bytes: None,
     };
 
     let server = Server::listen(cfg, configure_state_services)
@@ -479,6 +490,7 @@ async fn test_bid_response_state_with_nobid() {
         threads: Some(2),
         tls_rate_per_worker: None,
         keep_alive_secs: None,
+        gzip_min_bytes: None,
     };
 
     let server = Server::listen(cfg, configure_state_services)
@@ -507,6 +519,123 @@ async fn test_bid_response_state_with_nobid() {
     // Verify BidResponseState::NoBid converted to BidResponse with nbr set
     assert_eq!(bid_response.nbr, 1); // Technical error code
     assert_eq!(bid_response.seatbid.len(), 0); // No bids present
+
+    server.stop().await;
+}
+
+const GZIP_BODY_LEN: usize = 4096;
+
+fn large_json_body() -> String {
+    format!(r#"{{"p":"{}"}}"#, "a".repeat(GZIP_BODY_LEN))
+}
+
+async fn large_body_handler() -> HttpResponse {
+    HttpResponse::Ok()
+        .content_type("application/json")
+        .body(large_json_body())
+}
+
+fn configure_large_body_services(cfg: &mut ServiceConfig) {
+    cfg.route("/large", web::get().to(large_body_handler))
+        .route("/large", web::head().to(large_body_handler));
+}
+
+fn no_decompression_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .no_gzip()
+        .build()
+        .unwrap()
+}
+
+fn content_length(headers: &reqwest::header::HeaderMap) -> usize {
+    headers
+        .get(reqwest::header::CONTENT_LENGTH)
+        .expect("buffered gzip responses are framed with content-length")
+        .to_str()
+        .unwrap()
+        .parse()
+        .unwrap()
+}
+
+/// Gzip as a client sees it over a real socket: no client-side decompression,
+/// so the wire headers and bytes are what the server actually framed.
+async fn assert_gzipped_on_the_wire(url: &str, expect_h2: bool) {
+    use reqwest::header::{ACCEPT_ENCODING, CONTENT_ENCODING, VARY};
+
+    let response = no_decompression_client()
+        .get(url)
+        .header(ACCEPT_ENCODING, "gzip")
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), 200);
+    assert_eq!(response.version() == reqwest::Version::HTTP_2, expect_h2);
+    assert_eq!(response.headers()[CONTENT_ENCODING], "gzip");
+    assert_eq!(response.headers()[VARY], ACCEPT_ENCODING.as_str());
+    let declared_len = content_length(response.headers());
+    let wire = response.bytes().await.unwrap();
+    assert_eq!(declared_len, wire.len());
+
+    let mut body = String::new();
+    std::io::Read::read_to_string(&mut flate2::read::GzDecoder::new(wire.as_ref()), &mut body)
+        .unwrap();
+    assert_eq!(body, large_json_body());
+    assert!(wire.len() < body.len());
+}
+
+/// HEAD carries the same representation headers as GET, with no body.
+async fn assert_head_matches_get(url: &str) {
+    use reqwest::header::{ACCEPT_ENCODING, CONTENT_ENCODING};
+
+    let client = no_decompression_client();
+    let get = client
+        .get(url)
+        .header(ACCEPT_ENCODING, "gzip")
+        .send()
+        .await
+        .unwrap();
+    let head = client
+        .head(url)
+        .header(ACCEPT_ENCODING, "gzip")
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(head.headers()[CONTENT_ENCODING], "gzip");
+    assert_eq!(
+        content_length(head.headers()),
+        content_length(get.headers())
+    );
+    assert!(head.bytes().await.unwrap().is_empty());
+}
+
+#[actix_rt::test]
+async fn test_gzip_on_the_wire() {
+    let cfg = ServerConfig {
+        http_port: Some(8089),
+        ssl_port: Some(8446),
+        tls: Some(TlsConfig::SelfSigned {
+            hosts: vec!["localhost".to_string()],
+        }),
+        tcp_backlog: None,
+        max_conns: None,
+        threads: Some(2),
+        tls_rate_per_worker: None,
+        keep_alive_secs: None,
+        gzip_min_bytes: None,
+    };
+
+    let server = Server::listen(cfg, configure_large_body_services)
+        .await
+        .expect("Failed to start server");
+
+    actix_rt::time::sleep(Duration::from_millis(100)).await;
+
+    assert_gzipped_on_the_wire("http://127.0.0.1:8089/large", false).await;
+    assert_gzipped_on_the_wire("https://127.0.0.1:8446/large", true).await;
+    assert_head_matches_get("http://127.0.0.1:8089/large").await;
 
     server.stop().await;
 }

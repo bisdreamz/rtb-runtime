@@ -1,5 +1,5 @@
+use super::compress::{DEFAULT_GZIP_MIN_BYTES, Gzip};
 use actix_web::dev::ServerHandle;
-use actix_web::middleware::Compress;
 use actix_web::{App, HttpServer, rt, web};
 use rcgen::generate_simple_self_signed;
 use rustls::crypto::aws_lc_rs;
@@ -49,6 +49,10 @@ pub struct ServerConfig {
     /// connection-reuse window (e.g. Cloudflare pools origin connections
     /// for ~90s) or the proxy re-uses connections the server already closed.
     pub keep_alive_secs: Option<u64>,
+    /// Minimum response body size in bytes to gzip, when the client accepts
+    /// gzip. Smaller bodies (e.g. no-bid responses) are sent uncompressed.
+    /// None = [`DEFAULT_GZIP_MIN_BYTES`].
+    pub gzip_min_bytes: Option<usize>,
 }
 
 /// Instance of an HTTP(S) server
@@ -140,21 +144,18 @@ impl Server {
     where
         F: Fn(&mut web::ServiceConfig) + Send + Sync + Clone + 'static,
     {
-        let mut app = HttpServer::new(move || {
-            App::new()
-                .wrap(Compress::default())
-                .configure(configure.clone())
-        })
-        .backlog(cfg.tcp_backlog.unwrap_or(4096))
-        .max_connections(cfg.max_conns.unwrap_or(1 << 15))
-        .workers(
-            cfg.threads
-                .unwrap_or(std::thread::available_parallelism()?.get()),
-        )
-        .client_request_timeout(Duration::from_secs(1))
-        .max_connection_rate(cfg.tls_rate_per_worker.unwrap_or(512))
-        .tcp_nodelay(true)
-        .disable_signals();
+        let gzip = Gzip::new(cfg.gzip_min_bytes.unwrap_or(DEFAULT_GZIP_MIN_BYTES));
+        let mut app = HttpServer::new(move || App::new().wrap(gzip).configure(configure.clone()))
+            .backlog(cfg.tcp_backlog.unwrap_or(4096))
+            .max_connections(cfg.max_conns.unwrap_or(1 << 15))
+            .workers(
+                cfg.threads
+                    .unwrap_or(std::thread::available_parallelism()?.get()),
+            )
+            .client_request_timeout(Duration::from_secs(1))
+            .max_connection_rate(cfg.tls_rate_per_worker.unwrap_or(512))
+            .tcp_nodelay(true)
+            .disable_signals();
 
         if let Some(secs) = cfg.keep_alive_secs {
             app = app.keep_alive(Duration::from_secs(secs));
