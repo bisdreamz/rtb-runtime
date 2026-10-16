@@ -301,7 +301,9 @@ fn rust_type_path(path: &[String]) -> String {
         modules.push(segment.to_snake_case());
     }
 
-    let type_name = path.last().unwrap().clone();
+    // prost names types in upper camel case, so a proto message such as
+    // `SKAdNetworkRequest` is generated as `SkAdNetworkRequest`.
+    let type_name = path.last().unwrap().to_upper_camel_case();
 
     if modules.is_empty() {
         type_name
@@ -421,9 +423,12 @@ fn patch_pbjson_bool_handling(
         i += 1;
     }
 
-    if serialize_hits == 0 || deserialize_hits == 0 {
+    // Every bool field must be patched in both directions; one left out
+    // rejects OpenRTB's 0/1 encoding and fails the whole request.
+    let expected_hits = bool_fields.values().map(BTreeSet::len).sum::<usize>();
+    if serialize_hits != expected_hits || deserialize_hits != expected_hits {
         return Err(format!(
-            "failed to patch pbjson output for bool fields (serialize_hits={serialize_hits}, deserialize_hits={deserialize_hits})"
+            "failed to patch pbjson output for bool fields (expected={expected_hits}, serialize_hits={serialize_hits}, deserialize_hits={deserialize_hits})"
         )
         .into());
     }
