@@ -4,7 +4,7 @@ use actix_web::body::BoxBody;
 #[cfg(feature = "simd-json")]
 use actix_web::dev::Payload;
 #[cfg(feature = "simd-json")]
-use actix_web::web::BytesMut;
+use actix_web::web::{Bytes, BytesMut};
 #[cfg(feature = "simd-json")]
 use actix_web::{FromRequest, ResponseError};
 use actix_web::{HttpRequest, HttpResponse, Responder};
@@ -58,15 +58,15 @@ pub(crate) fn extract_gzip_isize(compressed: &[u8]) -> Result<usize, FastJsonErr
 }
 
 #[cfg(feature = "simd-json")]
-pub(crate) fn decompress_gzip(compressed: BytesMut) -> Result<BytesMut, FastJsonError> {
-    let isize = extract_gzip_isize(&compressed)?;
+pub(crate) fn decompress_gzip(compressed: &[u8]) -> Result<BytesMut, FastJsonError> {
+    let isize = extract_gzip_isize(compressed)?;
 
     DECOMPRESSOR.with(|d| {
         let mut decompressor = d.borrow_mut();
         let mut decompressed = BytesMut::zeroed(isize);
 
         let actual_size = decompressor
-            .gzip_decompress(&compressed, &mut decompressed)
+            .gzip_decompress(compressed, &mut decompressed)
             .map_err(|e| FastJsonError::Decompression(format!("libdeflater error: {:?}", e)))?;
 
         decompressed.truncate(actual_size);
@@ -112,8 +112,9 @@ impl<T> Deref for FastJson<T> {
 #[derive(Debug)]
 pub enum FastJsonError {
     Overflow,
+    /// The parser error and the body that failed, after gzip decoding.
     #[cfg(feature = "simd-json")]
-    Parse(simd_json::Error),
+    Parse(simd_json::Error, Bytes),
     #[cfg(feature = "simd-json")]
     Payload(actix_web::error::PayloadError),
     #[cfg(not(feature = "simd-json"))]
@@ -122,12 +123,23 @@ pub enum FastJsonError {
     Decompression(String),
 }
 
+impl FastJsonError {
+    /// The request body that failed to parse, after gzip decoding.
+    pub fn body(&self) -> Option<&[u8]> {
+        match self {
+            #[cfg(feature = "simd-json")]
+            FastJsonError::Parse(_, body) => Some(body),
+            _ => None,
+        }
+    }
+}
+
 impl fmt::Display for FastJsonError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             FastJsonError::Overflow => write!(f, "Payload too large"),
             #[cfg(feature = "simd-json")]
-            FastJsonError::Parse(e) => write!(f, "JSON parse error: {}", e),
+            FastJsonError::Parse(e, _) => write!(f, "JSON parse error: {}", e),
             FastJsonError::Payload(e) => write!(f, "Payload error: {}", e),
             #[cfg(feature = "simd-json")]
             FastJsonError::Decompression(e) => write!(f, "Decompression error: {}", e),
@@ -142,7 +154,7 @@ impl ResponseError for FastJsonError {
     fn error_response(&self) -> HttpResponse {
         match self {
             FastJsonError::Overflow => HttpResponse::PayloadTooLarge().finish(),
-            FastJsonError::Parse(_) => HttpResponse::BadRequest().finish(),
+            FastJsonError::Parse(..) => HttpResponse::BadRequest().finish(),
             FastJsonError::Payload(_) => HttpResponse::BadRequest().finish(),
             FastJsonError::Decompression(_) => HttpResponse::BadRequest().finish(),
         }
@@ -182,16 +194,26 @@ where
             }
 
             let encoded_bytes = body.len();
+            let body = body.freeze();
 
-            // Decompress if needed
+            // simd-json rewrites the buffer it parses, so it parses a copy and
+            // the original stays intact for a parse error. A gzip body is
+            // decoded into a new buffer anyway and decoded again on failure.
             let mut final_body = if is_gzip {
-                decompress_gzip(body)?
+                decompress_gzip(&body)?
             } else {
-                body
+                BytesMut::from(&body[..])
             };
             let decoded_bytes = final_body.len();
 
-            let value = simd_json::from_slice(final_body.as_mut()).map_err(FastJsonError::Parse)?;
+            let value = simd_json::from_slice(final_body.as_mut()).map_err(|error| {
+                let decoded = if is_gzip {
+                    decompress_gzip(&body).map(BytesMut::freeze).unwrap_or(body)
+                } else {
+                    body
+                };
+                FastJsonError::Parse(error, decoded)
+            })?;
             Ok(FastJson {
                 value,
                 body_stats: BodyStats {
@@ -286,7 +308,7 @@ mod tests {
         let compressed = encoder.finish().unwrap();
 
         let compressed_buf = BytesMut::from(&compressed[..]);
-        let decompressed = decompress_gzip(compressed_buf).unwrap();
+        let decompressed = decompress_gzip(&compressed_buf).unwrap();
 
         assert_eq!(&decompressed[..], data);
     }
@@ -299,7 +321,7 @@ mod tests {
         let compressed = encoder.finish().unwrap();
 
         let compressed_buf = BytesMut::from(&compressed[..]);
-        let decompressed = decompress_gzip(compressed_buf).unwrap();
+        let decompressed = decompress_gzip(&compressed_buf).unwrap();
 
         assert_eq!(&decompressed[..], json_data);
         assert!(serde_json::from_slice::<serde_json::Value>(&decompressed).is_ok());
@@ -331,5 +353,54 @@ mod tests {
         assert_eq!(stats.encoded_bytes, compressed_len);
         assert_eq!(stats.decoded_bytes, body.len());
         assert!(stats.gzip);
+    }
+
+    #[derive(serde::Deserialize)]
+    struct Typed {
+        #[allow(dead_code)]
+        name: String,
+        #[allow(dead_code)]
+        n: u32,
+    }
+
+    async fn extract_error(body: Vec<u8>, gzip: bool) -> FastJsonError {
+        let mut request = TestRequest::post();
+        if gzip {
+            request = request.insert_header(("content-encoding", "gzip"));
+        }
+        let (request, mut payload) = request.set_payload(body).to_http_parts();
+
+        match FastJson::<Typed>::from_request(&request, &mut payload).await {
+            Ok(_) => panic!("body should not parse"),
+            Err(error) => error,
+        }
+    }
+
+    // The escaped quote is rewritten in place by simd-json, so this proves the
+    // error carries the original body, not the parser's buffer.
+    const UNPARSEABLE: &[u8] = br#"{"name":"a\"b","n":"x"}"#;
+
+    #[actix_web::test]
+    async fn parse_error_carries_the_original_plain_body() {
+        let error = extract_error(UNPARSEABLE.to_vec(), false).await;
+
+        assert!(matches!(error, FastJsonError::Parse(..)));
+        assert_eq!(error.body(), Some(UNPARSEABLE));
+    }
+
+    #[actix_web::test]
+    async fn parse_error_carries_the_decoded_gzip_body() {
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(UNPARSEABLE).unwrap();
+
+        let error = extract_error(encoder.finish().unwrap(), true).await;
+
+        assert!(matches!(error, FastJsonError::Parse(..)));
+        assert_eq!(error.body(), Some(UNPARSEABLE));
+    }
+
+    #[test]
+    fn only_parse_errors_carry_a_body() {
+        assert_eq!(FastJsonError::Overflow.body(), None);
     }
 }
